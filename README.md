@@ -2,8 +2,6 @@
 
 A Python implementation of Cross-Impact Balance analysis with uncertainty quantification and robustness testing capabilities.
 
-- Andrew G. Ross 24JAN26
-
 ## Overview
 
 The methodology extends traditional CIB analysis  with ways to handle uncertainty, test how robust scenarios are, simulate how systems change over time, and model probabilities. The simplest approach uses point estimates from expert workshops to find consistent scenarios by checking all possibilities or using step-by-step methods. When experts are not completely certain about their judgments, confidence levels can be added to create probability distributions. This allows calculating how likely it is that a scenario stays consistent when judgments vary. Uncertainty can also increase over longer time horizons, since experts are usually less certain about the distant future. Scenarios can be tested for robustness by applying structural shocks, which are permanent changes to how factors influence each other. These might represent major policy changes, regime shifts, or fundamental system alterations. Shocks can be independent or correlated, and can use heavy-tailed distributions to capture rare but important (extreme) events. Dynamic analysis simulates how systems evolve over multiple time periods. Some factors change on their own according to transition probabilities. Threshold rules allow the system to switch between different modes when certain conditions are met, creating tipping points. Stochastic shocks add random disturbances that vary over time, with persistence so that large shocks tend to be followed by more disturbances. These stochastic shocks can have heavy tails or jump components to capture rare but 'extreme' events that create very different pathways. Results can be presented as Monte Carlo ensembles showing probability distributions over time, or as branching pathway graphs showing specific transformation routes. A separate probabilistic approach fits joint probability distributions from marginal probabilities and cross-impact multipliers. Multiple expert judgments can be combined with weights, and network analysis reveals system structure. The methodology supports energy transition planning, urban development scenarios, technology assessment, policy analysis, and strategic planning.
@@ -215,7 +213,7 @@ See LICENSE file for details.
 
 ### Cite as:
 
-Ross, A. G. (2025). A Python implementation of Cross-Impact Balance analysis with uncertainty quantification and robustness testing capabilities. https://github.com/ag-ross/pycib
+Ross, A. G. (2025). A Python implementation of Cross-Impact Balance analysis with uncertainty quantification and robustness testing capabilities. [10.5281/zenodo.18367511](https://doi.org/10.5281/zenodo.18367511)  
 
 ## References 
 
