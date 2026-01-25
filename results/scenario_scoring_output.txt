@@ -1,0 +1,42 @@
+============================================================
+SCENARIO SCORING OUTPUT
+============================================================
+
+INITIAL SCENARIO SCORING:
+  Consistent: True
+  Consistency Margin: 0.000
+  Total Impact Score: 22.000
+  Brink Descriptors (threshold=0.5): ['Policy_Stringency', 'Fossil_Price_Level', 'Renewables_Deployment', 'Grid_Flexibility', 'Electrification_Demand']
+  Chosen States: {'Policy_Stringency': 'Medium', 'Fossil_Price_Level': 'Medium', 'Renewables_Deployment': 'Moderate', 'Grid_Flexibility': 'Medium', 'Electrification_Demand': 'Medium'}
+
+  Impact Balances:
+    Policy_Stringency:
+      Very Low: -2.000
+      Low:  0.000
+      Medium:  2.000 <-- CHOSEN
+      High:  0.000
+      Very High: -2.000
+    Fossil_Price_Level:
+      Very Low: -2.000
+      Low:  0.000
+      Medium:  2.000 <-- CHOSEN
+      High:  0.000
+      Very High: -2.000
+    Renewables_Deployment:
+      Very Slow: -3.000
+      Slow:  0.000
+      Moderate:  4.000 <-- CHOSEN
+      Fast:  0.000
+      Very Fast: -3.000
+    Grid_Flexibility:
+      Very Low: -3.000
+      Low:  0.000
+      Medium:  6.000 <-- CHOSEN
+      High:  0.000
+      Very High: -3.000
+    Electrification_Demand:
+      Very Low: -4.000
+      Low:  0.000
+      Medium:  8.000 <-- CHOSEN
+      High:  0.000
+      Very High: -4.000

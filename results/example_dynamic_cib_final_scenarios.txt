@@ -1,0 +1,25 @@
+Final-period scenario network definitions (period=2045).
+Selected scenarios: 21.
+Coverage: 48/200.
+
+S0  count=4  scenario={'Policy_Stringency': 'High', 'Fossil_Price_Level': 'Medium', 'Renewables_Deployment': 'Moderate', 'Grid_Flexibility': 'High', 'Electrification_Demand': 'Very High'}
+S1  count=3  scenario={'Policy_Stringency': 'High', 'Fossil_Price_Level': 'High', 'Renewables_Deployment': 'Moderate', 'Grid_Flexibility': 'Medium', 'Electrification_Demand': 'High'}
+S2  count=3  scenario={'Policy_Stringency': 'High', 'Fossil_Price_Level': 'Low', 'Renewables_Deployment': 'Moderate', 'Grid_Flexibility': 'Medium', 'Electrification_Demand': 'High'}
+S3  count=3  scenario={'Policy_Stringency': 'Very High', 'Fossil_Price_Level': 'High', 'Renewables_Deployment': 'Fast', 'Grid_Flexibility': 'Medium', 'Electrification_Demand': 'High'}
+S4  count=3  scenario={'Policy_Stringency': 'High', 'Fossil_Price_Level': 'High', 'Renewables_Deployment': 'Moderate', 'Grid_Flexibility': 'High', 'Electrification_Demand': 'Very High'}
+S5  count=2  scenario={'Policy_Stringency': 'Very High', 'Fossil_Price_Level': 'High', 'Renewables_Deployment': 'Moderate', 'Grid_Flexibility': 'Medium', 'Electrification_Demand': 'High'}
+S6  count=2  scenario={'Policy_Stringency': 'High', 'Fossil_Price_Level': 'Medium', 'Renewables_Deployment': 'Very Fast', 'Grid_Flexibility': 'High', 'Electrification_Demand': 'Very High'}
+S7  count=2  scenario={'Policy_Stringency': 'Medium', 'Fossil_Price_Level': 'Very High', 'Renewables_Deployment': 'Moderate', 'Grid_Flexibility': 'High', 'Electrification_Demand': 'Low'}
+S8  count=2  scenario={'Policy_Stringency': 'Very High', 'Fossil_Price_Level': 'Medium', 'Renewables_Deployment': 'Very Fast', 'Grid_Flexibility': 'Medium', 'Electrification_Demand': 'Medium'}
+S9  count=2  scenario={'Policy_Stringency': 'High', 'Fossil_Price_Level': 'Very Low', 'Renewables_Deployment': 'Moderate', 'Grid_Flexibility': 'High', 'Electrification_Demand': 'High'}
+S10  count=2  scenario={'Policy_Stringency': 'Very High', 'Fossil_Price_Level': 'Medium', 'Renewables_Deployment': 'Moderate', 'Grid_Flexibility': 'Medium', 'Electrification_Demand': 'Very High'}
+S11  count=2  scenario={'Policy_Stringency': 'Medium', 'Fossil_Price_Level': 'High', 'Renewables_Deployment': 'Fast', 'Grid_Flexibility': 'Medium', 'Electrification_Demand': 'High'}
+S12  count=2  scenario={'Policy_Stringency': 'Very High', 'Fossil_Price_Level': 'Medium', 'Renewables_Deployment': 'Slow', 'Grid_Flexibility': 'Medium', 'Electrification_Demand': 'Medium'}
+S13  count=2  scenario={'Policy_Stringency': 'Low', 'Fossil_Price_Level': 'High', 'Renewables_Deployment': 'Moderate', 'Grid_Flexibility': 'Medium', 'Electrification_Demand': 'Medium'}
+S14  count=2  scenario={'Policy_Stringency': 'Very High', 'Fossil_Price_Level': 'Medium', 'Renewables_Deployment': 'Slow', 'Grid_Flexibility': 'Medium', 'Electrification_Demand': 'Low'}
+S15  count=2  scenario={'Policy_Stringency': 'Medium', 'Fossil_Price_Level': 'Medium', 'Renewables_Deployment': 'Moderate', 'Grid_Flexibility': 'Medium', 'Electrification_Demand': 'High'}
+S16  count=2  scenario={'Policy_Stringency': 'High', 'Fossil_Price_Level': 'Medium', 'Renewables_Deployment': 'Fast', 'Grid_Flexibility': 'High', 'Electrification_Demand': 'Very High'}
+S17  count=2  scenario={'Policy_Stringency': 'High', 'Fossil_Price_Level': 'Medium', 'Renewables_Deployment': 'Moderate', 'Grid_Flexibility': 'High', 'Electrification_Demand': 'Medium'}
+S18  count=2  scenario={'Policy_Stringency': 'High', 'Fossil_Price_Level': 'Medium', 'Renewables_Deployment': 'Fast', 'Grid_Flexibility': 'Medium', 'Electrification_Demand': 'High'}
+S19  count=2  scenario={'Policy_Stringency': 'High', 'Fossil_Price_Level': 'Medium', 'Renewables_Deployment': 'Moderate', 'Grid_Flexibility': 'Medium', 'Electrification_Demand': 'Very High'}
+S20  count=2  scenario={'Policy_Stringency': 'Very High', 'Fossil_Price_Level': 'Low', 'Renewables_Deployment': 'Fast', 'Grid_Flexibility': 'Medium', 'Electrification_Demand': 'Medium'}

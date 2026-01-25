@@ -1,0 +1,206 @@
+================================================================================
+CROSS-IMPACT MATRIX (CIM)
+Dataset: DATASET_B5 (Energy Transition - 5 descriptors × 5 states)
+================================================================================
+
+DESCRIPTORS AND STATES:
+--------------------------------------------------------------------------------
+  Policy_Stringency        : Very Low | Low | Medium | High | Very High
+  Fossil_Price_Level       : Very Low | Low | Medium | High | Very High
+  Renewables_Deployment    : Very Slow | Slow | Moderate | Fast | Very Fast
+  Grid_Flexibility         : Very Low | Low | Medium | High | Very High
+  Electrification_Demand   : Very Low | Low | Medium | High | Very High
+
+
+================================================================================
+IMPACT MATRIX SECTIONS
+================================================================================
+
+Format: Source_Descriptor[Source_State] -> Target_Descriptor[Target_State] = Impact(Confidence)
+
+--------------------------------------------------------------------------------
+SOURCE: Policy_Stringency
+--------------------------------------------------------------------------------
+  -> TARGET: Fossil_Price_Level
+                                  Very Low         Low      Medium        High   Very High
+  Policy_Stringency[Very Low       ]  -1(2)   0(2)   0(2)   0(2)   1(2)
+  Policy_Stringency[Low            ]  -1(2)   0(2)   0(2)   1(2)   0(2)
+  Policy_Stringency[Medium         ]  -1(2)   0(2)   1(2)   0(2)  -1(2)
+  Policy_Stringency[High           ]   0(2)   1(2)   0(2)   0(2)  -1(2)
+  Policy_Stringency[Very High      ]   1(2)   0(2)   0(2)   0(2)  -1(2)
+
+  -> TARGET: Renewables_Deployment
+                                 Very Slow        Slow    Moderate        Fast   Very Fast
+  Policy_Stringency[Very Low       ]   2(4)   1(4)   0(4)  -1(4)  -2(4)
+  Policy_Stringency[Low            ]   0(4)   2(4)   0(4)  -1(4)  -2(4)
+  Policy_Stringency[Medium         ]  -1(4)   0(4)   2(4)   0(4)  -1(4)
+  Policy_Stringency[High           ]  -2(4)  -1(4)   0(4)   2(4)   0(4)
+  Policy_Stringency[Very High      ]  -2(4)  -1(4)   0(4)   1(4)   2(4)
+
+  -> TARGET: Grid_Flexibility
+                                  Very Low         Low      Medium        High   Very High
+  Policy_Stringency[Very Low       ]   2(3)   1(3)   0(3)  -1(3)  -2(3)
+  Policy_Stringency[Low            ]   0(3)   2(3)   0(3)  -1(3)  -2(3)
+  Policy_Stringency[Medium         ]  -1(3)   0(3)   2(3)   0(3)  -1(3)
+  Policy_Stringency[High           ]  -2(3)  -1(3)   0(3)   2(3)   0(3)
+  Policy_Stringency[Very High      ]  -2(3)  -1(3)   0(3)   1(3)   2(3)
+
+  -> TARGET: Electrification_Demand
+                                  Very Low         Low      Medium        High   Very High
+  Policy_Stringency[Very Low       ]   2(1)   1(1)   0(1)  -1(1)  -2(1)
+  Policy_Stringency[Low            ]   0(1)   2(1)   0(1)  -1(1)  -2(1)
+  Policy_Stringency[Medium         ]  -1(1)   0(1)   2(1)   0(1)  -1(1)
+  Policy_Stringency[High           ]  -2(1)  -1(1)   0(1)   2(1)   0(1)
+  Policy_Stringency[Very High      ]  -2(1)  -1(1)   0(1)   1(1)   2(1)
+
+--------------------------------------------------------------------------------
+SOURCE: Fossil_Price_Level
+--------------------------------------------------------------------------------
+  -> TARGET: Policy_Stringency
+                                  Very Low         Low      Medium        High   Very High
+  Fossil_Price_Level[Very Low       ]   1(2)   0(2)   0(2)   0(2)  -1(2)
+  Fossil_Price_Level[Low            ]   0(2)   1(2)   0(2)   0(2)  -1(2)
+  Fossil_Price_Level[Medium         ]  -1(2)   0(2)   1(2)   0(2)  -1(2)
+  Fossil_Price_Level[High           ]  -1(2)   0(2)   0(2)   1(2)   0(2)
+  Fossil_Price_Level[Very High      ]  -1(2)   0(2)   0(2)   0(2)   1(2)
+
+  -> TARGET: Renewables_Deployment
+                                 Very Slow        Slow    Moderate        Fast   Very Fast
+  Fossil_Price_Level[Very Low       ]   1(3)   0(3)   0(3)   0(3)  -1(3)
+  Fossil_Price_Level[Low            ]   0(3)   1(3)   0(3)   0(3)  -1(3)
+  Fossil_Price_Level[Medium         ]  -1(3)   0(3)   1(3)   0(3)  -1(3)
+  Fossil_Price_Level[High           ]  -1(3)   0(3)   0(3)   1(3)   0(3)
+  Fossil_Price_Level[Very High      ]  -1(3)   0(3)   0(3)   0(3)   1(3)
+
+  -> TARGET: Grid_Flexibility
+                                  Very Low         Low      Medium        High   Very High
+  Fossil_Price_Level[Very Low       ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Fossil_Price_Level[Low            ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Fossil_Price_Level[Medium         ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Fossil_Price_Level[High           ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Fossil_Price_Level[Very High      ]   0(3)   0(3)   0(3)   0(3)   0(3)
+
+  -> TARGET: Electrification_Demand
+                                  Very Low         Low      Medium        High   Very High
+  Fossil_Price_Level[Very Low       ]   2(3)   1(3)   0(3)  -1(3)  -2(3)
+  Fossil_Price_Level[Low            ]   0(3)   2(3)   0(3)  -1(3)  -2(3)
+  Fossil_Price_Level[Medium         ]  -1(3)   0(3)   2(3)   0(3)  -1(3)
+  Fossil_Price_Level[High           ]  -2(3)  -1(3)   0(3)   2(3)   0(3)
+  Fossil_Price_Level[Very High      ]  -2(3)  -1(3)   0(3)   1(3)   2(3)
+
+--------------------------------------------------------------------------------
+SOURCE: Renewables_Deployment
+--------------------------------------------------------------------------------
+  -> TARGET: Policy_Stringency
+                                  Very Low         Low      Medium        High   Very High
+  Renewables_Deployment[Very Slow      ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Renewables_Deployment[Slow           ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Renewables_Deployment[Moderate       ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Renewables_Deployment[Fast           ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Renewables_Deployment[Very Fast      ]   0(3)   0(3)   0(3)   0(3)   0(3)
+
+  -> TARGET: Fossil_Price_Level
+                                  Very Low         Low      Medium        High   Very High
+  Renewables_Deployment[Very Slow      ]  -1(2)   0(2)   0(2)   0(2)   1(2)
+  Renewables_Deployment[Slow           ]  -1(2)   0(2)   0(2)   1(2)   0(2)
+  Renewables_Deployment[Moderate       ]  -1(2)   0(2)   1(2)   0(2)  -1(2)
+  Renewables_Deployment[Fast           ]   0(2)   1(2)   0(2)   0(2)  -1(2)
+  Renewables_Deployment[Very Fast      ]   1(2)   0(2)   0(2)   0(2)  -1(2)
+
+  -> TARGET: Grid_Flexibility
+                                  Very Low         Low      Medium        High   Very High
+  Renewables_Deployment[Very Slow      ]   2(4)   1(4)   0(4)  -1(4)  -2(4)
+  Renewables_Deployment[Slow           ]   0(4)   2(4)   0(4)  -1(4)  -2(4)
+  Renewables_Deployment[Moderate       ]  -1(4)   0(4)   2(4)   0(4)  -1(4)
+  Renewables_Deployment[Fast           ]  -2(4)  -1(4)   0(4)   2(4)   0(4)
+  Renewables_Deployment[Very Fast      ]  -2(4)  -1(4)   0(4)   1(4)   2(4)
+
+  -> TARGET: Electrification_Demand
+                                  Very Low         Low      Medium        High   Very High
+  Renewables_Deployment[Very Slow      ]   2(2)   1(2)   0(2)  -1(2)  -2(2)
+  Renewables_Deployment[Slow           ]   0(2)   2(2)   0(2)  -1(2)  -2(2)
+  Renewables_Deployment[Moderate       ]  -1(2)   0(2)   2(2)   0(2)  -1(2)
+  Renewables_Deployment[Fast           ]  -2(2)  -1(2)   0(2)   2(2)   0(2)
+  Renewables_Deployment[Very Fast      ]  -2(2)  -1(2)   0(2)   1(2)   2(2)
+
+--------------------------------------------------------------------------------
+SOURCE: Grid_Flexibility
+--------------------------------------------------------------------------------
+  -> TARGET: Policy_Stringency
+                                  Very Low         Low      Medium        High   Very High
+  Grid_Flexibility[Very Low       ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Grid_Flexibility[Low            ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Grid_Flexibility[Medium         ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Grid_Flexibility[High           ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Grid_Flexibility[Very High      ]   0(3)   0(3)   0(3)   0(3)   0(3)
+
+  -> TARGET: Fossil_Price_Level
+                                  Very Low         Low      Medium        High   Very High
+  Grid_Flexibility[Very Low       ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Grid_Flexibility[Low            ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Grid_Flexibility[Medium         ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Grid_Flexibility[High           ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Grid_Flexibility[Very High      ]   0(3)   0(3)   0(3)   0(3)   0(3)
+
+  -> TARGET: Renewables_Deployment
+                                 Very Slow        Slow    Moderate        Fast   Very Fast
+  Grid_Flexibility[Very Low       ]   1(3)   0(3)   0(3)   0(3)  -1(3)
+  Grid_Flexibility[Low            ]   0(3)   1(3)   0(3)   0(3)  -1(3)
+  Grid_Flexibility[Medium         ]  -1(3)   0(3)   1(3)   0(3)  -1(3)
+  Grid_Flexibility[High           ]  -1(3)   0(3)   0(3)   1(3)   0(3)
+  Grid_Flexibility[Very High      ]  -1(3)   0(3)   0(3)   0(3)   1(3)
+
+  -> TARGET: Electrification_Demand
+                                  Very Low         Low      Medium        High   Very High
+  Grid_Flexibility[Very Low       ]   2(2)   1(2)   0(2)  -1(2)  -2(2)
+  Grid_Flexibility[Low            ]   0(2)   2(2)   0(2)  -1(2)  -2(2)
+  Grid_Flexibility[Medium         ]  -1(2)   0(2)   2(2)   0(2)  -1(2)
+  Grid_Flexibility[High           ]  -2(2)  -1(2)   0(2)   2(2)   0(2)
+  Grid_Flexibility[Very High      ]  -2(2)  -1(2)   0(2)   1(2)   2(2)
+
+--------------------------------------------------------------------------------
+SOURCE: Electrification_Demand
+--------------------------------------------------------------------------------
+  -> TARGET: Policy_Stringency
+                                  Very Low         Low      Medium        High   Very High
+  Electrification_Demand[Very Low       ]   1(2)   0(2)   0(2)   0(2)  -1(2)
+  Electrification_Demand[Low            ]   0(2)   1(2)   0(2)   0(2)  -1(2)
+  Electrification_Demand[Medium         ]  -1(2)   0(2)   1(2)   0(2)  -1(2)
+  Electrification_Demand[High           ]  -1(2)   0(2)   0(2)   1(2)   0(2)
+  Electrification_Demand[Very High      ]  -1(2)   0(2)   0(2)   0(2)   1(2)
+
+  -> TARGET: Fossil_Price_Level
+                                  Very Low         Low      Medium        High   Very High
+  Electrification_Demand[Very Low       ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Electrification_Demand[Low            ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Electrification_Demand[Medium         ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Electrification_Demand[High           ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Electrification_Demand[Very High      ]   0(3)   0(3)   0(3)   0(3)   0(3)
+
+  -> TARGET: Renewables_Deployment
+                                 Very Slow        Slow    Moderate        Fast   Very Fast
+  Electrification_Demand[Very Low       ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Electrification_Demand[Low            ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Electrification_Demand[Medium         ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Electrification_Demand[High           ]   0(3)   0(3)   0(3)   0(3)   0(3)
+  Electrification_Demand[Very High      ]   0(3)   0(3)   0(3)   0(3)   0(3)
+
+  -> TARGET: Grid_Flexibility
+                                  Very Low         Low      Medium        High   Very High
+  Electrification_Demand[Very Low       ]   2(4)   1(4)   0(4)  -1(4)  -2(4)
+  Electrification_Demand[Low            ]   0(4)   2(4)   0(4)  -1(4)  -2(4)
+  Electrification_Demand[Medium         ]  -1(4)   0(4)   2(4)   0(4)  -1(4)
+  Electrification_Demand[High           ]  -2(4)  -1(4)   0(4)   2(4)   0(4)
+  Electrification_Demand[Very High      ]  -2(4)  -1(4)   0(4)   1(4)   2(4)
+
+
+================================================================================
+CONFIDENCE CODES
+================================================================================
+  5 = Very High Confidence (sigma = 0.2)
+  4 = High Confidence (sigma = 0.5)
+  3 = Medium Confidence (sigma = 0.8)
+  2 = Low Confidence (sigma = 1.2)
+  1 = Very Low Confidence (sigma = 1.5)
+
+Impact values range from -3 (strongly hindering) to +3 (strongly promoting)
