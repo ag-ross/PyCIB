@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import product
+import warnings
 from typing import Dict, Iterable, List, Literal, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
@@ -102,6 +103,24 @@ class BranchingPathwayBuilder:
       locked during within-period succession, consistent with `DynamicCIB`.
     - Threshold rules are evaluated on the *current* period scenario and modify
       the active matrix used for the *next* period transition.
+
+    Enumeration vs sampling:
+        The builder automatically chooses between enumeration and sampling modes
+        based on scenario-space size (controlled by `max_states_to_enumerate`).
+
+        - Enumeration mode (scenario space size <= max_states_to_enumerate):
+          - Enumerates all consistent scenarios for a deterministic base matrix
+          - Ignores `judgment_sigma_scale_by_period` and `structural_sigma`
+          - Produces complete, deterministic results
+
+        - Sampling mode (scenario space size > max_states_to_enumerate):
+          - Estimates transition distributions via Monte Carlo sampling
+          - Respects `judgment_sigma_scale_by_period` and `structural_sigma`
+          - Produces stochastic, approximate results
+
+        Note: if uncertainty parameters are set but enumeration mode is used,
+        those parameters are ignored. To ensure uncertainty is applied, decrease
+        `max_states_to_enumerate` to force sampling mode.
     """
 
     def __init__(
@@ -146,7 +165,9 @@ class BranchingPathwayBuilder:
             max_nodes_per_period: Optional cap used to prune each period layer for readability.
             base_seed: Base seed used for reproducible sampling.
             structural_sigma: Optional structural shock magnitude applied to sampled matrices.
+                Note: only used in sampling mode; ignored in enumeration mode.
             judgment_sigma_scale_by_period: Optional per-period sigma scales used for matrix sampling.
+                Note: only used in sampling mode; ignored in enumeration mode.
             dynamic_tau: Optional long-run scale for AR(1) dynamic shocks.
             dynamic_rho: AR(1) persistence parameter in [-1, 1].
             dynamic_innovation_dist: Innovation distribution used for dynamic shocks.
@@ -299,6 +320,24 @@ class BranchingPathwayBuilder:
         """
         periods = tuple(int(t) for t in self.periods)
 
+        has_uncertainty = (
+            self.structural_sigma is not None
+            or self.judgment_sigma_scale_by_period is not None
+        )
+        scenario_space_size = _scenario_space_size(self.base_matrix.descriptors)
+        can_enumerate = scenario_space_size <= self.max_states_to_enumerate
+        if has_uncertainty and can_enumerate:
+            warnings.warn(
+                "Uncertainty parameters (structural_sigma and/or "
+                "judgment_sigma_scale_by_period) were provided, but enumeration "
+                f"mode will be used (scenario space size: {scenario_space_size} "
+                f"<= {self.max_states_to_enumerate}). These uncertainty parameters "
+                "are ignored in enumeration mode. To ensure uncertainty is applied, "
+                "decrease `max_states_to_enumerate` to force sampling mode.",
+                UserWarning,
+                stacklevel=2,
+            )
+
         # The initial state is mapped to its attractor at period 0 (deterministic).
         init_state = dict(self.initial)
         init_lock = self._lock_map(init_state)
@@ -322,7 +361,6 @@ class BranchingPathwayBuilder:
             # Method is chosen based on scenario-space size of *unlocked* descriptors.
             # This is a global choice per transition layer (simple and predictable).
             # The worst-case space is computed (no locks), which is conservative.
-            can_enumerate = _scenario_space_size(self.base_matrix.descriptors) <= self.max_states_to_enumerate
             method = "enumerate" if can_enumerate else "sample"
             transition_method[int(t)] = method
 
