@@ -1,7 +1,7 @@
 """
 Minimal joint-distribution probabilistic CIA example (dynamic: per-period refit).
 
-This shows how to compute P(scenario at t) for each period by fitting
+The computation of P(scenario at t) is illustrated for each period by fitting
 independent static models per period.
 
 This example reuses the canonical dataset labels from `cib.example_data`
@@ -12,6 +12,7 @@ separate model (not derived from CIB impact scores).
 from __future__ import annotations
 
 import os
+import sys
 from typing import Dict, Tuple
 
 import matplotlib
@@ -19,7 +20,10 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
-from cib.example_data import DATASET_B5_DESCRIPTORS, DATASET_B5_NUMERIC_MAPPING
+# The repository root is added to the path so that examples can be run directly.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from cib.example_data import DATASET_B5_DESCRIPTORS, DATASET_B5_NUMERIC_MAPPING, DEFAULT_PERIODS
 from cib.prob import DiagnosticsReport, DynamicProbabilisticCIA, FactorSpec, ProbabilisticCIAModel
 from cib.prob.types import ScenarioIndex
 from cib.visualization import DynamicVisualizer
@@ -192,7 +196,7 @@ def _create_ordered_numeric_mapping(outcomes: list[str]) -> Dict[str, float]:
 def main() -> None:
     factors = _choose_factors()
     index = ScenarioIndex(factors)
-    periods = [2025, 2030, 2035]
+    periods = list(DEFAULT_PERIODS)
 
     # Synthetic joint-distribution probabilistic CIA joint distributions per period are created (using real labels).
     # Different Dirichlet draws are used to induce different marginals per period.

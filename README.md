@@ -1,14 +1,14 @@
-# Cross-Impact Balance (CIB) Analysis Package
+# PyCIB Cross-Impact Balance (CIB) Analysis Package
 
-A Python implementation of Cross-Impact Balance analysis with uncertainty quantification and robustness testing capabilities.
+PyCIB is a Python implementation of Cross-Impact Balance analysis with uncertainty quantification and robustness testing capabilities.
 
 ## Overview
 
-The methodology extends traditional CIB analysis  with ways to handle uncertainty, test how robust scenarios are, simulate how systems change over time, and model probabilities. The simplest approach uses point estimates from expert workshops to find consistent scenarios by checking all possibilities or using step-by-step methods. When experts are not completely certain about their judgments, confidence levels can be added to create probability distributions. This allows calculating how likely it is that a scenario stays consistent when judgments vary. Uncertainty can also increase over longer time horizons, since experts are usually less certain about the distant future. Scenarios can be tested for robustness by applying structural shocks, which are permanent changes to how factors influence each other. These might represent major policy changes, regime shifts, or fundamental system alterations. Shocks can be independent or correlated, and can use heavy-tailed distributions to capture rare but important (extreme) events. Dynamic analysis simulates how systems evolve over multiple time periods. Some factors change on their own according to transition probabilities. Threshold rules allow the system to switch between different modes when certain conditions are met, creating tipping points. Stochastic shocks add random disturbances that vary over time, with persistence so that large shocks tend to be followed by more disturbances. These stochastic shocks can have heavy tails or jump components to capture rare but 'extreme' events that create very different pathways. Results can be presented as Monte Carlo ensembles showing probability distributions over time, or as branching pathway graphs showing specific transformation routes. A separate probabilistic approach fits joint probability distributions from marginal probabilities and cross-impact multipliers. Multiple expert judgments can be combined with weights, and network analysis reveals system structure. The methodology supports energy transition planning, urban development scenarios, technology assessment, policy analysis, and strategic planning.
+A Python implementation of Cross-Impact Balance (CIB) analysis is provided for scenario construction and evaluation from expert-elicited cross-impacts. Deterministic workflows are supported for consistency checking, succession to attractors, and scenario enumeration where feasible. Uncertainty and stochasticity are supported so that probabilistic outputs can be produced from Monte Carlo ensembles and branching pathway graphs (simulation-first probabilistic CIB). Workshop judgements may be treated as uncertain through confidence-coded sampling of the cross-impact matrix (CIM), and uncertainty may be scaled with horizon where such a modelling assumption is required. Robustness may be assessed under structural shocks, including correlated and heavy-tailed variants where configured. Within-period succession may be perturbed by dynamic shocks with persistence, including rare-event components where configured. Multi-period pathways may be simulated under threshold rules and cyclic descriptors, and equilibrium analogues may be reported where configured. Probabilistic summaries may be reported as per-period state probabilities, quantiles for mapped numeric outcomes, and explicit pathway structures in branching graphs. A separate probabilistic cross-impact analysis (CIA) extension, `cib.prob`, is also provided. In this extension, an explicit joint distribution is fitted from user-specified marginal probabilities and cross-impact multipliers interpreted as conditional probability ratios. This fitted joint distribution is not derived from CIB impact balances unless it has been parameterised explicitly as such. Expert judgements may be aggregated with weights (including partial coverage), and network analysis is provided for structural interpretation and communication. The package is intended for scenario work in settings such as energy transition planning, urban development, technology assessment, and policy analysis.
 
-This package provides:
+The following is provided by this package:
 
-- **Phase 1 (MVP)**: Deterministic CIB analysis with consistency checking,
+- **Phase 1**: Deterministic CIB analysis with consistency checking,
   succession operators, and scenario enumeration
 - **Phase 2**: Uncertainty quantification via confidence-coded impacts and
   Monte Carlo estimation, plus robustness testing under structural shocks
@@ -44,13 +44,50 @@ matrix.set_impact('Tourism', 'Increase', 'GDP_Growth', 'Strong', 2)
 # ... set all impacts
 
 # Find consistent scenarios
-analyzer = ScenarioAnalyzer(matrix)
-consistent_scenarios = analyzer.find_all_consistent()
+analyser = ScenarioAnalyzer(matrix)
+consistent_scenarios = analyser.find_all_consistent()
 
 print(f"Found {len(consistent_scenarios)} consistent scenarios")
 ```
 
-### Dynamic CIB (5-state demo: probability bands + fan + spaghetti, fat-tails + jumps)
+### Feasibility constraints (domain rules)
+
+When domain rules are required to be respected (in addition to CIB consistency), feasibility constraints may be specified.
+
+```python
+from cib import CIBMatrix, ScenarioAnalyzer
+from cib.constraints import AllowedStates, ForbiddenPair, Implies
+from cib.solvers.config import ExactSolverConfig
+
+matrix = CIBMatrix(descriptors)
+# Impacts are set as usual.
+
+analyser = ScenarioAnalyzer(matrix)
+res = analyser.find_all_consistent_exact(
+    config=ExactSolverConfig(
+        constraints=[
+            Implies("Electrification_Demand", "High", "Renewables_Deployment", "Moderate"),
+            ForbiddenPair("Policy_Stringency", "High", "Public_Acceptance", "Low"),
+            AllowedStates("Technology_Costs", allowed={"Moderate", "Low"}),
+        ]
+    )
+)
+print(len(res.scenarios))
+```
+
+### Sparse scoring backend (Monte Carlo succession)
+
+When a large, sparse impact structure is provided, a sparse scoring backend may be selected for Monte Carlo attractor discovery:
+
+```python
+from cib.solvers.config import MonteCarloAttractorConfig
+
+cfg = MonteCarloAttractorConfig(runs=5000, fast_backend="sparse")
+res = analyser.find_attractors_monte_carlo(config=cfg)
+print(res.status, len(res.counts))
+```
+
+### Dynamic CIB (5-state demonstration: probability bands + fan + spaghetti, fat tails + jumps)
 
 ```python
 import matplotlib.pyplot as plt
@@ -150,17 +187,32 @@ plt.show()
 
 Detailed guidance on when to use Monte Carlo ensembles versus branching pathway graphs is documented in `docs/Documentation.md`.
 
+### Diagnostics, attribution, and sensitivity (summary)
+
+For research workflows where interpretability and robustness are required, additional utilities are provided:
+
+- **Scenario diagnostics**: consistency, margins, and “brink” descriptors are provided by `scenario_diagnostics`.
+- **Local attribution**: margin-to-switching is decomposed by source contributions by `attribute_scenario`, and simple bounded flip candidates are suggested by `flip_candidates_for_descriptor` (heuristic).
+- **Rare-event diagnostics**: basic reliability summaries are provided by `event_rate_diagnostics` and `near_miss_rate`.
+- **Global sensitivity**: an ensemble-level driver–outcome sensitivity report is provided by `compute_global_sensitivity_dynamic`.
+
 ## Documentation
 
-See the `examples/` directory for detailed usage examples:
+Detailed usage examples are provided in the `examples/` directory:
 
 - `dynamic_cib.ipynb`: Canonical 5-state dynamic example (probability bands + fan + spaghetti)
+- `example_dynamic_cib_c10.py`: Dynamic CIB on `DATASET_C10` (workshop-scale dataset)
+- `example_dynamic_cib_c15_rare_events.py`: Dynamic CIB on `DATASET_C15` (rare events + regime switching)
+- `example_state_binning.py`: State binning (model reduction for large state spaces)
+- `example_solver_modes.py`: Scaling solver modes (exact pruned enumeration and Monte Carlo attractors)
+- `example_solver_modes_c10.py`: Scaling solver modes on `DATASET_C10` (workshop-scale dataset)
+- `example_enumeration_c10.py`: Full enumeration on `DATASET_C10` (brute-force consistency filtering + exact solver parity; a diagnostic plot is written to `results/example_enumeration_c10_plot_1.png`)
+- `example_attractor_basin_validation_c10.py`: Exact basin weights on `DATASET_C10` (full-space succession) with a Monte Carlo comparison plot written to `results/example_attractor_basin_validation_c10_plot_1.png`
 
 Additional docs:
 
 - `docs/api_reference.md`: high-level API surface
-- `docs/Documentation.md`: concise equations, modeling choices, and result interpretation (simulation-first CIB)
-- `docs/Probabilistic_CIA.md`: quickstart for the experimental joint-distribution probabilistic CIA extension (`cib.prob`)
+- `docs/Documentation.md`: concise equations, modelling choices, and result interpretation (simulation-first CIB and joint-distribution probabilistic CIA, `cib.prob`)
 
 ## Key Features
 
@@ -175,18 +227,18 @@ Additional docs:
 
 ### Phase 2: Uncertainty and Robustness
 
-- UncertainCIBMatrix: Confidence-coded impacts with uncertainty modeling
+- UncertainCIBMatrix: Confidence-coded impacts with uncertainty modelling
 - MonteCarloAnalyzer: Estimate P(consistent | z) via Monte Carlo
 - ShockModel: Apply structural perturbations to impact matrices
 - RobustnessTester: Evaluate scenario stability under shocks
 
 ## Example Datasets
 
-The package includes an example dataset in `cib.example_data`:
+An example dataset is provided in `cib.example_data`:
 
-- **Energy transition demo**: 5 descriptors × 5 states (canonical example)
+- **Energy transition demonstration**: 5 descriptors × 5 states (canonical example)
 
-The dataset includes complete impact matrices and confidence codes.
+Complete impact matrices and confidence codes are included in the dataset.
 
 Preferred import path for datasets is `cib.example_data`.
 
@@ -196,26 +248,26 @@ Generated outputs and guidance on interpretation are documented in `docs/Documen
 
 ## Coding
 
-The author utilised OpenAI as language and code assistant during the preparation of this work.
+OpenAI was utilised as a language and code assistant during the preparation of this work.
 
 ## Testing
 
-Run the test suite:
+The test suite may be run with:
 
 ```bash
 cd pycib
 python3 -m pytest tests/
 ```
 
-## License
+## Licence
 
-See LICENSE file for details.
+Details are provided in the LICENSE file.
 
 ### Cite as:
 
 Ross, A. G. (2025). A Python implementation of Cross-Impact Balance analysis with uncertainty quantification and robustness testing capabilities. [10.5281/zenodo.18367511](https://doi.org/10.5281/zenodo.18367511)  
 
-## References 
+## References
 
 Aoki, M., & Yoshikawa, H. (2011). Reconstructing macroeconomics: a perspective from statistical physics and combinatorial stochastic processes. Cambridge University Press.
 

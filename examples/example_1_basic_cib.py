@@ -2,7 +2,7 @@
 """
 Example 1: Basic Deterministic CIB
 
-This example demonstrates the core CIB functionality:
+The core CIB functionality is demonstrated:
 - Creating a CIB matrix
 - Setting impact relationships
 - Finding consistent scenarios

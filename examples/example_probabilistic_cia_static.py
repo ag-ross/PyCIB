@@ -1,11 +1,11 @@
 """
 Minimal joint-distribution probabilistic CIA example (static).
 
-This demonstrates the new `cib.prob` module:
-  - define factors and marginals,
-  - define cross-impact multipliers (probability ratios),
-  - fit a coherent joint distribution over scenarios,
-  - inspect a few implied probabilities.
+The `cib.prob` module is demonstrated:
+  - factors and marginals are defined,
+  - cross-impact multipliers (probability ratios) are defined,
+  - a coherent joint distribution over scenarios is fitted,
+  - a small number of implied probabilities are inspected.
 
 This example reuses the canonical dataset labels from `cib.example_data`
 (Dataset B5 descriptor/state names), but the joint-distribution probabilistic CIA probabilities are a

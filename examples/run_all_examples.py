@@ -71,8 +71,18 @@ def main():
         ("example_cycle_detection.py", "Example: Cycle Detection in CIB Succession"),
         ("example_transformation_matrix.py", "Example: Transformation Matrix Analysis"),
         ("run_notebook.py", "Notebook: Dynamic CIB (from dynamic_cib.ipynb)"),
+        ("example_dynamic_cib_c10.py", "Example: Dynamic CIB on DATASET_C10 (workshop scale)"),
+        ("example_enumeration_c10.py", "Example: Full enumeration on DATASET_C10"),
+        ("example_attractor_basin_validation_c10.py", "Example: Attractor basin validation on DATASET_C10"),
+        ("example_state_binning.py", "Example: State Binning (model reduction)"),
+        ("example_solver_modes.py", "Example: Scaling solver modes (exact and Monte Carlo)"),
+        ("example_solver_modes_c10.py", "Example: Scaling solver modes on DATASET_C10 (workshop scale)"),
         ("example_probabilistic_cia_static.py", "Example: Joint-Distribution Probabilistic CIA (static)"),
         ("example_probabilistic_cia_dynamic_refit.py", "Example: Joint-Distribution Probabilistic CIA (dynamic refit)"),
+        ("example_probabilistic_cia_strict_vs_repair.py", "Example: Joint-Distribution Probabilistic CIA (strict versus repair)"),
+        ("example_probabilistic_cia_dynamic_predict_update.py", "Example: Joint-Distribution Probabilistic CIA (dynamic predict–update)"),
+        ("example_probabilistic_cia_sparse_kl.py", "Example: Joint-Distribution Probabilistic CIA (sparse constraints + KL + bounds)"),
+        ("example_probabilistic_cia_scaling_iterative.py", "Example: Joint-Distribution Probabilistic CIA (scaling, iterative approximate)"),
     ]
     
     results = []

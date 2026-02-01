@@ -2,10 +2,10 @@
 """
 Example: Cycle Detection in CIB Succession
 
-This example demonstrates:
+The following is demonstrated:
 - How cycles are detected in deterministic succession
 - Cycle handling in stochastic succession with dynamic shocks
-- Cycle behavior in multi-period dynamic simulations
+- Cycle behaviour in multi-period dynamic simulations
 - Interpreting cycle results
 """
 
@@ -23,6 +23,7 @@ from cib import (
     UncertainCIBMatrix,
 )
 from cib.core import ConsistencyChecker
+from cib.example_data import DEFAULT_PERIODS
 
 
 def create_cycle_prone_matrix() -> CIBMatrix:
@@ -185,7 +186,7 @@ def example_dynamic_simulation_cycles():
     print("=" * 60)
 
     matrix = create_cycle_prone_matrix()
-    periods = [2025, 2030, 2035]
+    periods = list(DEFAULT_PERIODS)
 
     dynamic = DynamicCIB(base_matrix=matrix, periods=periods)
 

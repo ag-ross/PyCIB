@@ -2,8 +2,8 @@
 """
 Example: Transformation Matrix Analysis
 
-This example demonstrates building transformation matrices to identify
-which perturbations cause transitions between scenarios.
+The construction of transformation matrices is demonstrated, where the
+perturbations that cause transitions between scenarios are identified.
 """
 
 import sys
