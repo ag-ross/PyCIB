@@ -463,7 +463,7 @@ Optionally, uncertainty can be made time-dependent (a common elicitation assumpt
 
 ### 3) Structural shocks (stress-testing, regime perturbations)
 
-Structural shocks represent persistent or structural perturbations to the CIM, distinct from judgement uncertainty. Conceptually, they answer: “If the world deviates from the elicited system in a persistent way, how robust are our consistent scenarios?” Structural shocks perturb the CIM and then the consistency/succession computations are repeated under the perturbed matrix.
+Structural shocks are represented as perturbations to the CIM entries, distinct from judgement uncertainty. Conceptually, the following question is addressed: “If the world deviates from the elicited system, how robust are the consistent scenarios?” Structural shocks are applied by perturbing the CIM and repeating the consistency and succession computations under the perturbed matrix. In robustness testing and other static stress-testing uses, a single perturbed CIM is sampled per shock draw. In `DynamicCIB.simulate_path()`, structural shocks are re-sampled per period when `structural_sigma` is provided. In `DynamicCIB.simulate_ensemble()`, structural shocks are applied once per run when `judgment_sigma_growth` is zero, and are applied per period when `judgment_sigma_growth` is positive.
 
 ### 4) Dynamic shocks (AR(1) stochastic forcing during succession)
 
@@ -484,15 +484,13 @@ This separation is recommended because it preserves the classical CIB definition
 
 Two additional mechanisms govern when and how the active CIM changes and how certain descriptors evolve:
 
-- **Threshold rules** conditionally modify the active CIM based on the current scenario (e.g. tipping points or policy regimes). A small disturbance can move the system across a threshold, which then changes the CIM and alters subsequent attractors.
+- **Threshold rules** conditionally modify the active CIM based on the current scenario (e.g. tipping points or policy regimes). A small disturbance can move the system across a threshold, which then changes the CIM and alters subsequent attractors. When multiple rules match, the applied behaviour is controlled by a threshold matching policy. The default behaviour is sequential application of all matching modifiers in the configured order. An alternative first-match-only policy is supported.
 - **Cyclic descriptors** evolve via an explicit transition matrix between periods (often with strong persistence), representing exogenous drift or inertia that is not endogenously resolved by CIB within a period. These descriptors are “locked” during within-period succession so that their exogenous evolution is not overwritten.
 
 Threshold rule timing:
 
-- In `DynamicCIB.simulate_path()`, cyclic transitions (if configured) are applied at the start of each new period (t > 0), and threshold rules are then evaluated on the resulting (post-cyclic) scenario state to select the active period matrix used for within-period succession.
-- In `BranchingPathwayBuilder.build()`, threshold rules are evaluated on the parent scenario (period t) to construct the active CIM used for the transition into period t+1.
-
-These conventions are both valid; the key is to be explicit about which scenario state a threshold condition is evaluated against, especially when threshold conditions depend on cyclic descriptors.
+- In both `DynamicCIB.simulate_path()` and `BranchingPathwayBuilder.build()`, threshold rules for period t+1 are evaluated on the scenario at the start of period t+1 (after cyclic transitions have been applied). The active CIM used for the transition into period t+1 is therefore determined by that post-cyclic scenario in both entry points.
+- It is important to be explicit about which scenario state a threshold condition is evaluated against when threshold conditions depend on cyclic descriptors; the implementation uses the post-cyclic state consistently.
 
 ### 6) What a “Monte Carlo run” is (and why it is a single path)
 
@@ -726,6 +724,10 @@ When transformation pathways are constructed across sub-periods, two complementa
 - **Sampling (Monte Carlo)**: if the scenario space is large, the reachable scenario set and transition probabilities are approximated by repeated random restarts, uncertainty/shock sampling, and succession.
   - Respects judgement uncertainty (`judgment_sigma_scale_by_period`) and structural shocks (`structural_sigma`) when configured.
   - Transition probabilities are estimated from counts and converge with more samples.
+
+Dynamic-shock note for branching:
+
+- In `BranchingPathwayBuilder`, dynamic shocks are sampled independently per transition layer. AR(1) persistence across periods is not represented in the branching graph, and `dynamic_rho` is not used to induce cross-period momentum.
 
 Important:
 
