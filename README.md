@@ -18,8 +18,8 @@ The following is provided by this package:
 ## Installation
 
 ```bash
-cd pycib
-pip install -e .
+# From the repository root (the directory containing setup.py):
+python -m pip install -e .
 ```
 
 ## Quick Start
@@ -255,8 +255,9 @@ OpenAI was utilised as a language and code assistant during the preparation of t
 The test suite may be run with:
 
 ```bash
-cd pycib
-python3 -m pytest tests/
+# From the repository root (the directory containing setup.py):
+python -m pip install -e ".[dev]"
+python -m pytest tests/
 ```
 
 ## Licence
