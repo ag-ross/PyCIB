@@ -75,6 +75,30 @@ res = analyser.find_all_consistent_exact(
 print(len(res.scenarios))
 ```
 
+### Dynamic feasibility constraints (opt-in)
+
+When feasibility constraints are required in dynamic runs, `DynamicCIB` can enforce them in strict or repair mode.
+In repair mode, cyclic descriptors remain fixed within each period and repair is
+currently supported with the built-in `GlobalSuccession` operator.
+
+```python
+from cib import DynamicCIB
+from cib.constraints import ForbiddenPair
+
+dyn = DynamicCIB(matrix, periods=[2025, 2030, 2035])
+constraints = [ForbiddenPair("Policy_Stringency", "High", "Public_Acceptance", "Low")]
+
+path = dyn.simulate_path(
+    initial=initial_scenario,
+    constraints=constraints,
+    constraint_mode="repair",  # "none" (default), "strict", or "repair"
+    constrained_top_k=2,
+    constrained_backtracking_depth=2,
+    cyclic_infeasible_retries=2,
+    first_period_output_mode="attractor",  # or "initial"
+)
+```
+
 ### Sparse scoring backend (Monte Carlo succession)
 
 When a large, sparse impact structure is provided, a sparse scoring backend may be selected for Monte Carlo attractor discovery:
@@ -153,6 +177,9 @@ for m in range(n_runs):
         )
     )
 
+# Dynamic shock forcing via `dynamic_shocks_by_period` is currently applied
+# with the built-in `GlobalSuccession` operator.
+
 timelines = state_probability_timelines(paths, scenario_mode="realized")
 timelines_equilibrium = state_probability_timelines(paths, scenario_mode="equilibrium")
 quantiles = numeric_quantile_timelines(
@@ -183,6 +210,31 @@ plt.tight_layout()
 plt.show()
 ```
 
+### Structural shock scaling option
+
+Optional scaling of structural-shock disturbances by baseline impact magnitude can be applied. Default behaviour is retained as additive.
+
+```python
+from cib.shocks import ShockModel
+
+sm = ShockModel(matrix)
+sm.add_structural_shocks(
+    sigma=0.20,
+    scaling_mode="multiplicative_magnitude",  # default is "additive"
+    scaling_alpha=0.75,  # non-negative
+)
+matrix_shocked = sm.sample_shocked_matrix(seed=123)
+```
+
+In `multiplicative_magnitude` mode, each structural shock is scaled by
+`1 + scaling_alpha * abs(base_impact)/3` before clipping to `[-3, +3]`.
+
+Optional descriptor/state multipliers are also supported for structural and
+dynamic shocks via `scale_by_descriptor={...}` and `scale_by_state={...}`.
+For calibration guidance, helper functions are available:
+`calibrate_structural_sigma_from_confidence(...)` and
+`suggest_dynamic_tau_bounds(...)`.
+
 ### Monte Carlo vs branching (summary)
 
 Detailed guidance on when to use Monte Carlo ensembles versus branching pathway graphs is documented in `docs/Documentation.md`.
@@ -203,6 +255,7 @@ Detailed usage examples are provided in the `examples/` directory:
 - `dynamic_cib.ipynb`: Canonical 5-state dynamic example (probability bands + fan + spaghetti)
 - `example_dynamic_cib_c10.py`: Dynamic CIB on `DATASET_C10` (workshop-scale dataset)
 - `example_dynamic_cib_c15_rare_events.py`: Dynamic CIB on `DATASET_C15` (rare events + regime switching)
+- `example_shock_robustness_completeness.py`: Shock robustness completeness workflow (confidence-guided calibration helpers, descriptor/state scaling, extended robustness metrics)
 - `example_state_binning.py`: State binning (model reduction for large state spaces)
 - `example_solver_modes.py`: Scaling solver modes (exact pruned enumeration and Monte Carlo attractors)
 - `example_solver_modes_c10.py`: Scaling solver modes on `DATASET_C10` (workshop-scale dataset)
@@ -229,8 +282,8 @@ Additional docs:
 
 - UncertainCIBMatrix: Confidence-coded impacts with uncertainty modelling
 - MonteCarloAnalyzer: Estimate P(consistent | z) via Monte Carlo
-- ShockModel: Apply structural perturbations to impact matrices
-- RobustnessTester: Evaluate scenario stability under shocks
+- ShockModel: Apply structural perturbations to impact matrices (with optional magnitude-dependent structural shock scaling)
+- RobustnessTester: Evaluate scenario stability under shocks, including extended robustness metrics (attractor retention, switch rate, mean Hamming distance, and Wilson intervals)
 
 ## Example Datasets
 
