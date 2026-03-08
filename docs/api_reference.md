@@ -8,7 +8,7 @@ This project exposes its public API through the `cib` package.
 - `Scenario`: scenario state assignment (labels at API boundary, 0-based indices internally).
 - `ConsistencyChecker`: check CIB consistency of a scenario.
 - `ScenarioAnalyzer`: enumerate/filter consistent scenarios (small systems) or find a shortlist via random restarts (large systems).
-- `GlobalSuccession`, `LocalSuccession`, `AttractorFinder`: succession operators and attractor discovery.
+- `GlobalSuccession`, `ConstrainedGlobalSuccession`, `LocalSuccession`, `AttractorFinder`: succession operators and attractor discovery.
 
 ## Scaling solvers (opt-in)
 
@@ -49,9 +49,11 @@ Integration points:
 
 ## Robustness and shocks
 
-- `ShockModel`: structural shocks (independent or correlated) and AR(1) dynamic shocks.
-- `RobustnessTester`: robustness score = fraction of simulations where a scenario remains consistent under structural shocks.
+- `ShockModel`: structural shocks (independent or correlated), optional structural scaling (`additive` or `multiplicative_magnitude`) plus descriptor/state multipliers, and AR(1) dynamic shocks with optional descriptor/state multipliers.
+- `RobustnessTester`: consistency robustness and extended robustness metrics (attractor retention, switch rate, mean Hamming distance to base attractor, Wilson intervals) under structural shocks.
 - `ShockAwareGlobalSuccession`: global succession with additive dynamic shocks on impact balances.
+- `calibrate_structural_sigma_from_confidence(...)`: helper to derive a structural sigma candidate from confidence codes (`mean`, `median`, or `p75`).
+- `suggest_dynamic_tau_bounds(...)`: helper to suggest a dynamic tau range as proportions of structural sigma.
 
 ## Expert aggregation (practical Bayesian-style)
 
@@ -60,7 +62,7 @@ Integration points:
 
 ## Dynamic CIB (simulation-first)
 
-- `DynamicCIB`: simulate multi-period pathways with optional cyclic descriptors and threshold-triggered CIM modifiers. Optional equilibrium outputs can be requested via `equilibrium_mode` to obtain a per-period unshocked relaxation (matrix-consistent attractor) alongside the shock-realised trajectory.
+- `DynamicCIB`: simulate multi-period pathways with optional cyclic descriptors and threshold-triggered CIM modifiers. Optional equilibrium outputs can be requested via `equilibrium_mode` to obtain a per-period unshocked relaxation (matrix-consistent attractor) alongside the shock-realised trajectory. Optional dynamic feasibility controls are available via `constraints`/`constraint_index` with `constraint_mode="strict" | "repair"`, bounded repair (`constrained_top_k`, `constrained_backtracking_depth`), cyclic retry control (`cyclic_infeasible_retries`), and first-period output selection (`first_period_output_mode`). In repair mode, period-locked cyclic descriptors remain fixed and repair is currently supported with the built-in `GlobalSuccession` operator. Dynamic shock forcing via `dynamic_shocks_by_period` and sampled `dynamic_tau` shocks is also currently supported with the built-in `GlobalSuccession` operator.
 - `ThresholdRule`: conditionally modify the active CIM.
 - `CyclicDescriptor`: per-period state transitions via a transition probability matrix.
 - `TransformationPathway`: pathway representation. When `equilibrium_mode` is enabled, `equilibrium_scenarios` is populated to provide an equilibrium analogue of `scenarios`.

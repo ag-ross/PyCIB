@@ -686,6 +686,29 @@ C \leftarrow C + \varepsilon,\qquad \varepsilon \sim \mathcal{N}(0, \Sigma)
 
 The default is independent shocks (diagonal \(\Sigma\)); correlated shocks are supported via an explicit correlation matrix.
 
+### Optional structural shock scaling
+
+An optional scaling mode is supported for structural shocks so that perturbation size can depend on the baseline impact magnitude. This is intended as an exploratory sensitivity option and is disabled by default.
+
+- **Default (additive)**:
+\[
+C_i'=\mathrm{clip}(C_i+\varepsilon_i,\,-3,+3)
+\]
+- **Multiplicative-by-magnitude**:
+\[
+\varepsilon_i^{\mathrm{eff}}=\varepsilon_i\left(1+\alpha\frac{|C_i|}{3}\right),\qquad
+C_i'=\mathrm{clip}(C_i+\varepsilon_i^{\mathrm{eff}},\,-3,+3)
+\]
+with \(\alpha\ge 0\).
+
+Practical note: clipping still applies after scaling, so boundary attenuation near \(\pm 3\) remains present (although scaling can change where this attenuation becomes visible).
+
+Optional heterogeneity can be introduced through descriptor/state multipliers:
+- Structural shocks: `scale_by_descriptor` and `scale_by_state` apply multiplicative factors at the source descriptor/source-state level.
+- Dynamic shocks: `scale_by_descriptor` and `scale_by_state` apply multiplicative factors at the `(descriptor, candidate_state)` level.
+
+Defaults are neutral (all multipliers equal to 1.0), so baseline behaviour is preserved unless multipliers are set explicitly.
+
 ### Optional fat tails / rare events
 
 For “rare event” realism, disturbances can be sampled from heavy-tailed or jump-mixture distributions:
@@ -712,6 +735,25 @@ The innovation \(u_{j,l}(t)\) is mean-zero with long-run scale \(\tau\). Common 
 - Gaussian innovations: \(u_{j,l}(t)\sim \mathcal{N}(0,(1-\rho^2)\tau^2)\)
 - Student-t innovations (fat tails): \(u_{j,l}(t)\sim t_{\nu}\) scaled to match \((1-\rho^2)\tau^2\)
 - Jump innovations: with probability \(p\), a jump term is added to the innovation (rare events)
+
+### Extended robustness metrics (optional)
+
+Beyond consistency-survival robustness, extended metrics can be evaluated for a tested scenario under structural shocks:
+
+- **Attractor retention rate**: fraction of shock draws where the canonical attractor (fixed point, or cycle representative selected by a deterministic rule) reached from the tested scenario matches the corresponding unshocked canonical attractor.
+- **Switch rate**: fraction of shock draws where the shocked canonical attractor differs from the unshocked canonical attractor.
+- **Mean Hamming distance to base attractor**: average descriptor-wise distance between shocked and unshocked canonical attractors.
+
+Wilson intervals are reported for rate-type metrics to support uncertainty-aware interpretation.
+
+### Confidence-guided calibration helpers (optional)
+
+Two helper functions are provided for transparent parameter suggestion:
+
+- `calibrate_structural_sigma_from_confidence(...)`: confidence codes are mapped via `ConfidenceMapper.sigma_from_confidence(...)`, and aggregation is performed with `mean`, `median`, or `p75`.
+- `suggest_dynamic_tau_bounds(...)`: a tau range is proposed as user-selected proportions of structural sigma.
+
+These helpers provide reproducible starting values and do not automatically override user-selected shock parameters.
 
 ### Branching pathways (hybrid enumeration + sampling)
 
@@ -799,6 +841,12 @@ Application points:
   Violations are detected during the depth-first search and branches are pruned accordingly.
 - In deterministic analysis helper workflows (`ScenarioAnalyzer.find_all_consistent(...)`), constraints may be provided via the `constraints=` argument.
   Candidates that violate constraints are excluded.
+- In dynamic simulation (`DynamicCIB.simulate_path(...)` and `DynamicCIB.simulate_ensemble(...)`), constraints may be provided via `constraints=[...]` or a precompiled `constraint_index`.
+  Feasibility handling is optional and controlled via `constraint_mode`:
+  - `"none"`: no dynamic feasibility checks are applied (default behaviour).
+  - `"strict"`: infeasible initial states, cyclic transitions, or selected attractors raise an error.
+  - `"repair"`: bounded repair is attempted using constrained top-k/backtracking controls (`constrained_top_k`, `constrained_backtracking_depth`). Period-locked cyclic descriptors remain fixed during repair, and repair is currently supported with the built-in `GlobalSuccession` operator.
+  Additional controls are available for cyclic transition retries (`cyclic_infeasible_retries`) and first-period reporting (`first_period_output_mode`). Dynamic shock forcing in `DynamicCIB` (`dynamic_shocks_by_period` or sampled `dynamic_tau` shocks) is likewise currently supported with the built-in `GlobalSuccession` operator.
 
 ### Model reduction (high-cardinality descriptors)
 
