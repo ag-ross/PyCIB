@@ -72,6 +72,7 @@ def main():
         ("example_transformation_matrix.py", "Example: Transformation Matrix Analysis"),
         ("run_notebook.py", "Notebook: Dynamic CIB (from dynamic_cib.ipynb)"),
         ("example_dynamic_cib_c10.py", "Example: Dynamic CIB on DATASET_C10 (workshop scale)"),
+        ("example_shock_robustness_completeness.py", "Example: Shock robustness completeness workflow (calibration + scaling + robustness metrics)"),
         ("example_enumeration_c10.py", "Example: Full enumeration on DATASET_C10"),
         ("example_attractor_basin_validation_c10.py", "Example: Attractor basin validation on DATASET_C10"),
         ("example_state_binning.py", "Example: State Binning (model reduction)"),
