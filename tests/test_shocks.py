@@ -9,7 +9,12 @@ import pytest
 import numpy as np
 
 from cib.core import CIBMatrix, Scenario
-from cib.shocks import RobustnessTester, ShockModel
+from cib.shocks import (
+    RobustnessTester,
+    ShockModel,
+    calibrate_structural_sigma_from_confidence,
+    suggest_dynamic_tau_bounds,
+)
 from cib.dynamic import DynamicCIB
 
 
@@ -58,6 +63,8 @@ class TestShockModel:
         shock_model.add_structural_shocks(sigma=0.25)
 
         assert shock_model.structural_sigma == 0.25
+        assert shock_model.structural_scaling_mode == "additive"
+        assert shock_model.structural_scaling_alpha == 0.0
 
     def test_add_structural_shocks_invalid_sigma(self) -> None:
         """Test that non-positive sigma raises ValueError."""
@@ -69,6 +76,105 @@ class TestShockModel:
 
         with pytest.raises(ValueError, match="must be positive"):
             shock_model.add_structural_shocks(sigma=0.0)
+
+    def test_add_structural_shocks_invalid_scaling_config(self) -> None:
+        """Test scaling mode and alpha validation."""
+        matrix = _toy_matrix()
+        shock_model = ShockModel(matrix)
+
+        with pytest.raises(ValueError, match="scaling_mode must be"):
+            shock_model.add_structural_shocks(
+                sigma=0.25,
+                scaling_mode="unsupported_mode",
+            )
+
+        with pytest.raises(ValueError, match="scaling_alpha must be non-negative"):
+            shock_model.add_structural_shocks(
+                sigma=0.25,
+                scaling_mode="multiplicative_magnitude",
+                scaling_alpha=-0.1,
+            )
+
+        with pytest.raises(ValueError, match="keys must be"):
+            shock_model.add_structural_shocks(
+                sigma=0.25,
+                scale_by_state={("A", "Low", "extra"): 1.2},  # type: ignore[dict-item]
+            )
+
+    def test_structural_shock_additive_explicit_matches_default(self) -> None:
+        """Explicit additive scaling should match default behavior."""
+        matrix = _toy_matrix()
+
+        default_model = ShockModel(matrix)
+        default_model.add_structural_shocks(sigma=0.25)
+        explicit_model = ShockModel(matrix)
+        explicit_model.add_structural_shocks(
+            sigma=0.25, scaling_mode="additive", scaling_alpha=0.0
+        )
+
+        sampled_default = default_model.sample_shocked_matrix(seed=123)
+        sampled_explicit = explicit_model.sample_shocked_matrix(seed=123)
+
+        key = ("A", "Low", "B", "Low")
+        assert sampled_default.get_impact(*key) == sampled_explicit.get_impact(*key)
+
+    def test_structural_multiplicative_scaling_amplifies_nonzero_base(self) -> None:
+        """Multiplicative scaling should enlarge shock size for non-zero impacts."""
+        descriptors = {"A": ["S"], "B": ["T"]}
+        matrix = CIBMatrix(descriptors)
+        matrix.set_impact("A", "S", "B", "T", 1.5)  # non-zero base
+        matrix.set_impact("B", "T", "A", "S", 0.0)  # zero base
+
+        additive = ShockModel(matrix)
+        additive.add_structural_shocks(sigma=0.01, scaling_mode="additive")
+        mult = ShockModel(matrix)
+        mult.add_structural_shocks(
+            sigma=0.01,
+            scaling_mode="multiplicative_magnitude",
+            scaling_alpha=1.0,
+        )
+
+        sampled_add = additive.sample_shocked_matrix(seed=7)
+        sampled_mul = mult.sample_shocked_matrix(seed=7)
+
+        key_nonzero = ("A", "S", "B", "T")
+        key_zero = ("B", "T", "A", "S")
+
+        base_nonzero = matrix.get_impact(*key_nonzero)
+        base_zero = matrix.get_impact(*key_zero)
+        delta_add_nonzero = abs(sampled_add.get_impact(*key_nonzero) - base_nonzero)
+        delta_mul_nonzero = abs(sampled_mul.get_impact(*key_nonzero) - base_nonzero)
+        delta_add_zero = abs(sampled_add.get_impact(*key_zero) - base_zero)
+        delta_mul_zero = abs(sampled_mul.get_impact(*key_zero) - base_zero)
+
+        assert delta_mul_nonzero > delta_add_nonzero
+        assert delta_mul_zero == pytest.approx(delta_add_zero)
+
+    def test_structural_descriptor_and_state_scaling(self) -> None:
+        """Descriptor/state multipliers should change structural shock magnitude."""
+        descriptors = {"A": ["S"], "B": ["T"]}
+        matrix = CIBMatrix(descriptors)
+        matrix.set_impact("A", "S", "B", "T", 1.0)
+        matrix.set_impact("B", "T", "A", "S", 1.0)
+
+        baseline = ShockModel(matrix)
+        baseline.add_structural_shocks(sigma=0.05, scaling_mode="additive")
+        scaled = ShockModel(matrix)
+        scaled.add_structural_shocks(
+            sigma=0.05,
+            scaling_mode="additive",
+            scale_by_descriptor={"A": 2.0},
+            scale_by_state={("A", "S"): 1.5},
+        )
+
+        b = baseline.sample_shocked_matrix(seed=21)
+        s = scaled.sample_shocked_matrix(seed=21)
+        key_scaled = ("A", "S", "B", "T")
+        key_unscaled = ("B", "T", "A", "S")
+
+        base = matrix.get_impact(*key_scaled)
+        assert abs(s.get_impact(*key_scaled) - base) > abs(b.get_impact(*key_scaled) - base)
+        assert s.get_impact(*key_unscaled) == pytest.approx(b.get_impact(*key_unscaled))
 
     def test_sample_shocked_matrix_reproducibility(self) -> None:
         """Test that shock sampling is reproducible."""
@@ -85,6 +191,22 @@ class TestShockModel:
         val2 = sampled2.get_impact(key[0], key[1], key[2], key[3])
 
         assert val1 == val2
+
+    def test_sample_shocked_matrix_reproducibility_multiplicative_scaling(self) -> None:
+        """Multiplicative scaling mode should remain reproducible with fixed seed."""
+        matrix = _toy_matrix()
+        shock_model = ShockModel(matrix)
+        shock_model.add_structural_shocks(
+            sigma=0.25,
+            scaling_mode="multiplicative_magnitude",
+            scaling_alpha=0.8,
+        )
+
+        sampled1 = shock_model.sample_shocked_matrix(seed=456)
+        sampled2 = shock_model.sample_shocked_matrix(seed=456)
+
+        key = ("A", "High", "B", "Low")
+        assert sampled1.get_impact(*key) == sampled2.get_impact(*key)
 
     def test_sample_shocked_matrix_structure(self) -> None:
         """Test that shocked matrix has correct structure."""
@@ -135,6 +257,16 @@ class TestRobustnessTester:
 
         assert 0.0 <= robustness <= 1.0
 
+    def test_test_scenario_invalid_n_simulations(self) -> None:
+        matrix = _toy_matrix()
+        shock_model = ShockModel(matrix)
+        shock_model.add_structural_shocks(sigma=0.25)
+        scenario = Scenario({"A": "Low", "B": "Low", "C": "Low"}, matrix)
+        tester = RobustnessTester(matrix, shock_model)
+
+        with pytest.raises(ValueError, match="n_simulations must be positive"):
+            tester.test_scenario(scenario, n_simulations=0, seed=123)
+
     def test_test_scenarios(self) -> None:
         """Test robustness scoring for multiple scenarios."""
         matrix = _toy_matrix()
@@ -168,6 +300,16 @@ class TestRobustnessTester:
         for scenario in scenarios:
             assert scenario in scores
             assert 0.0 <= scores[scenario] <= 1.0
+
+    def test_test_scenarios_invalid_n_simulations(self) -> None:
+        matrix = _toy_matrix()
+        shock_model = ShockModel(matrix)
+        shock_model.add_structural_shocks(sigma=0.25)
+        scenarios = [Scenario({"A": "Low", "B": "Low", "C": "Low"}, matrix)]
+        tester = RobustnessTester(matrix, shock_model)
+
+        with pytest.raises(ValueError, match="n_simulations must be positive"):
+            tester.test_scenarios(scenarios, n_simulations=0, seed=123)
 
     def test_rank_by_robustness(self) -> None:
         """Test ranking scenarios by robustness."""
@@ -264,3 +406,65 @@ class TestAdvancedShockModeling:
             dynamic_shocks_by_period=dynamic_shocks,
         )
         assert path.scenarios[0].to_dict()["A"] == "High"
+
+    def test_dynamic_shock_descriptor_scaling(self) -> None:
+        matrix = _toy_matrix()
+        base = ShockModel(matrix)
+        base.add_dynamic_shocks(periods=[1, 2], tau=0.2, rho=0.5)
+        scaled = ShockModel(matrix)
+        scaled.add_dynamic_shocks(
+            periods=[1, 2],
+            tau=0.2,
+            rho=0.5,
+            scale_by_descriptor={"A": 2.0},
+            scale_by_state={("A", "High"): 1.5},
+        )
+
+        d_base = base.sample_dynamic_shocks(seed=42)
+        d_scaled = scaled.sample_dynamic_shocks(seed=42)
+        key = ("A", "High")
+        assert abs(d_scaled[1][key]) > abs(d_base[1][key])
+
+
+class TestRobustnessExtensions:
+    def test_evaluate_scenario_returns_extended_metrics(self) -> None:
+        matrix = _toy_matrix()
+        shock_model = ShockModel(matrix)
+        shock_model.add_structural_shocks(sigma=0.2)
+        tester = RobustnessTester(matrix, shock_model)
+        scenario = Scenario({"A": "Low", "B": "Low", "C": "Low"}, matrix)
+
+        metrics = tester.evaluate_scenario(
+            scenario,
+            n_simulations=50,
+            seed=123,
+            max_iterations=100,
+        )
+        assert metrics.n_simulations == 50
+        assert 0.0 <= metrics.consistency_rate <= 1.0
+        assert 0.0 <= metrics.attractor_retention_rate <= 1.0
+        assert 0.0 <= metrics.switch_rate <= 1.0
+        assert metrics.mean_hamming_to_base_attractor >= 0.0
+
+
+class TestShockCalibrationHelpers:
+    def test_calibrate_structural_sigma_from_confidence(self) -> None:
+        sigma_mean = calibrate_structural_sigma_from_confidence([5, 4, 3, 2, 1], method="mean")
+        sigma_med = calibrate_structural_sigma_from_confidence([5, 4, 3, 2, 1], method="median")
+        assert sigma_mean > 0
+        assert sigma_med > 0
+
+    def test_calibrate_structural_sigma_from_confidence_invalid_method(self) -> None:
+        with pytest.raises(ValueError, match="method must be"):
+            calibrate_structural_sigma_from_confidence([5, 4, 3], method="bad")
+
+    def test_suggest_dynamic_tau_bounds(self) -> None:
+        lo, hi = suggest_dynamic_tau_bounds(0.8, low_ratio=0.5, high_ratio=1.25)
+        assert lo == pytest.approx(0.4)
+        assert hi == pytest.approx(1.0)
+
+    def test_suggest_dynamic_tau_bounds_invalid_ratios(self) -> None:
+        with pytest.raises(ValueError, match="must be positive"):
+            suggest_dynamic_tau_bounds(0.8, low_ratio=0.0, high_ratio=1.0)
+        with pytest.raises(ValueError, match="must be <="):
+            suggest_dynamic_tau_bounds(0.8, low_ratio=1.1, high_ratio=1.0)

@@ -4,9 +4,13 @@ Unit tests for dynamic (multi-period) CIB simulation.
 
 from __future__ import annotations
 
+import pytest
+
+from cib.constraints import ConstraintIndex, ForbiddenPair
 from cib.core import CIBMatrix, ConsistencyChecker
 from cib.cyclic import CyclicDescriptor
 from cib.dynamic import DynamicCIB
+from cib.succession import GlobalSuccession, LocalSuccession
 from cib.threshold import ThresholdRule
 from cib.example_data import (
     DATASET_B5_CONFIDENCE,
@@ -241,4 +245,363 @@ class TestDynamicCIB:
         for p in paths:
             assert list(p.periods) == periods
             assert len(p.scenarios) == len(periods)
+
+    def test_structural_shock_scaling_validation(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1])
+
+        with pytest.raises(ValueError, match="Unsupported structural_shock_scaling_mode"):
+            dyn.simulate_path(
+                initial={"A": "Low", "B": "Low"},
+                structural_sigma=0.1,
+                structural_shock_scaling_mode="bad_mode",  # type: ignore[arg-type]
+            )
+
+        with pytest.raises(
+            ValueError, match="structural_shock_scaling_alpha must be non-negative"
+        ):
+            dyn.simulate_ensemble(
+                initial={"A": "Low", "B": "Low"},
+                n_runs=2,
+                base_seed=123,
+                structural_sigma=0.1,
+                structural_shock_scaling_alpha=-0.1,
+            )
+
+    def test_structural_shock_additive_pass_through_matches_default(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("A", "Low", "B", "Low", 2.0)
+        m.set_impact("A", "Low", "B", "High", -2.0)
+        m.set_impact("A", "High", "B", "Low", -2.0)
+        m.set_impact("A", "High", "B", "High", 2.0)
+        m.set_impact("B", "Low", "A", "Low", 2.0)
+        m.set_impact("B", "Low", "A", "High", -2.0)
+        m.set_impact("B", "High", "A", "Low", -2.0)
+        m.set_impact("B", "High", "A", "High", 2.0)
+
+        dyn = DynamicCIB(m, periods=[1, 2])
+        paths_default = dyn.simulate_ensemble(
+            initial={"A": "Low", "B": "Low"},
+            n_runs=10,
+            base_seed=321,
+            structural_sigma=0.15,
+        )
+        paths_additive = dyn.simulate_ensemble(
+            initial={"A": "Low", "B": "Low"},
+            n_runs=10,
+            base_seed=321,
+            structural_sigma=0.15,
+            structural_shock_scaling_mode="additive",
+            structural_shock_scaling_alpha=0.0,
+        )
+
+        assert [p.to_dicts() for p in paths_default] == [p.to_dicts() for p in paths_additive]
+
+    def test_structural_shock_scale_map_validation_in_dynamic_api(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1])
+
+        with pytest.raises(ValueError, match="unknown descriptor"):
+            dyn.simulate_path(
+                initial={"A": "Low", "B": "Low"},
+                structural_sigma=0.1,
+                structural_shock_scale_by_descriptor={"Unknown": 2.0},
+            )
+
+    def test_dynamic_shock_scale_map_validation_in_dynamic_api(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1])
+
+        with pytest.raises(ValueError, match="unknown descriptor"):
+            dyn.simulate_ensemble(
+                initial={"A": "Low", "B": "Low"},
+                n_runs=2,
+                base_seed=123,
+                dynamic_tau=0.2,
+                dynamic_shock_scale_by_descriptor={"Unknown": 1.5},
+            )
+
+    def test_dynamic_constraints_strict_rejects_initial_infeasibility(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1])
+        constraints = [ForbiddenPair("A", "High", "B", "High")]
+        with pytest.raises(ValueError, match="Initial scenario is infeasible"):
+            dyn.simulate_path(
+                initial={"A": "High", "B": "High"},
+                constraints=constraints,
+                constraint_mode="strict",
+            )
+
+    def test_dynamic_constraints_repair_repairs_initial_infeasibility(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1])
+        constraints = [ForbiddenPair("A", "High", "B", "High")]
+        p = dyn.simulate_path(
+            initial={"A": "High", "B": "High"},
+            constraints=constraints,
+            constraint_mode="repair",
+            constrained_top_k=2,
+            constrained_backtracking_depth=2,
+        )
+        out = p.scenarios[0].to_dict()
+        assert not (out["A"] == "High" and out["B"] == "High")
+
+    def test_dynamic_constraints_cyclic_retry_exhaustion_strict(self) -> None:
+        descriptors = {"Cycle": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("Cycle", "Low", "B", "Low", 0.0)
+        m.set_impact("Cycle", "Low", "B", "High", 1.0)
+        m.set_impact("Cycle", "High", "B", "Low", 0.0)
+        m.set_impact("Cycle", "High", "B", "High", 1.0)
+        dyn = DynamicCIB(m, periods=[1, 2])
+        dyn.add_cyclic_descriptor(
+            CyclicDescriptor(
+                name="Cycle",
+                transition={
+                    "Low": {"High": 1.0},
+                    "High": {"High": 1.0},
+                },
+            )
+        )
+        constraints = [ForbiddenPair("Cycle", "High", "B", "High")]
+        with pytest.raises(ValueError, match="Cyclic transition produced infeasible state"):
+            dyn.simulate_path(
+                initial={"Cycle": "Low", "B": "High"},
+                constraints=constraints,
+                constraint_mode="strict",
+                cyclic_infeasible_retries=1,
+            )
+
+    def test_dynamic_constraints_repair_preserves_cyclic_lock(self) -> None:
+        descriptors = {"Cycle": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        for cycle_state in descriptors["Cycle"]:
+            m.set_impact("Cycle", cycle_state, "B", "Low", 0.0)
+            m.set_impact("Cycle", cycle_state, "B", "High", 1.0)
+        for b_state in descriptors["B"]:
+            m.set_impact("B", b_state, "Cycle", "Low", 0.0)
+            m.set_impact("B", b_state, "Cycle", "High", 1.0)
+
+        dyn = DynamicCIB(m, periods=[1, 2])
+        dyn.add_cyclic_descriptor(
+            CyclicDescriptor(
+                name="Cycle",
+                transition={
+                    "Low": {"High": 1.0},
+                    "High": {"High": 1.0},
+                },
+            )
+        )
+        constraints = [ForbiddenPair("Cycle", "High", "B", "High")]
+        diag = {}
+        p = dyn.simulate_path(
+            initial={"Cycle": "Low", "B": "Low"},
+            constraints=constraints,
+            constraint_mode="repair",
+            constrained_top_k=2,
+            constrained_backtracking_depth=2,
+            diagnostics=diag,
+        )
+        states = [s.to_dict() for s in p.scenarios]
+        assert states[0] == {"Cycle": "Low", "B": "High"}
+        assert states[1] == {"Cycle": "High", "B": "Low"}
+        assert diag.get("constraint_repairs_applied") == ["post_cyclic_transition"]
+
+    def test_dynamic_constraints_repair_preserves_cyclic_lock_in_equilibrium(self) -> None:
+        descriptors = {"Cycle": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        for cycle_state in descriptors["Cycle"]:
+            m.set_impact("Cycle", cycle_state, "B", "Low", 0.0)
+            m.set_impact("Cycle", cycle_state, "B", "High", 1.0)
+        for b_state in descriptors["B"]:
+            m.set_impact("B", b_state, "Cycle", "Low", 0.0)
+            m.set_impact("B", b_state, "Cycle", "High", 1.0)
+
+        dyn = DynamicCIB(m, periods=[1, 2])
+        dyn.add_cyclic_descriptor(
+            CyclicDescriptor(
+                name="Cycle",
+                transition={
+                    "Low": {"High": 1.0},
+                    "High": {"High": 1.0},
+                },
+            )
+        )
+        constraints = [ForbiddenPair("Cycle", "High", "B", "High")]
+        diag = {}
+        p = dyn.simulate_path(
+            initial={"Cycle": "Low", "B": "Low"},
+            constraints=constraints,
+            constraint_mode="repair",
+            constrained_top_k=2,
+            constrained_backtracking_depth=2,
+            equilibrium_mode="relax_unshocked",
+            diagnostics=diag,
+        )
+        assert p.equilibrium_scenarios is not None
+        eq_states = [s.to_dict() for s in p.equilibrium_scenarios]
+        assert eq_states[0] == {"Cycle": "Low", "B": "High"}
+        assert eq_states[1] == {"Cycle": "High", "B": "Low"}
+        assert diag.get("constraint_repairs_applied") == [
+            "post_cyclic_transition",
+            "post_equilibrium_selection",
+        ]
+
+    def test_dynamic_constraints_repair_rejects_non_global_succession(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1])
+        constraints = [ForbiddenPair("A", "High", "B", "High")]
+        with pytest.raises(
+            ValueError,
+            match="constraint_mode='repair' currently supports only the built-in GlobalSuccession operator",
+        ):
+            dyn.simulate_path(
+                initial={"A": "Low", "B": "Low"},
+                constraints=constraints,
+                constraint_mode="repair",
+                succession_operator=LocalSuccession(),
+            )
+
+    def test_dynamic_constraints_repair_rejects_global_subclass(self) -> None:
+        class DerivedGlobalSuccession(GlobalSuccession):
+            pass
+
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1])
+        constraints = [ForbiddenPair("A", "High", "B", "High")]
+        with pytest.raises(
+            ValueError,
+            match="constraint_mode='repair' currently supports only the built-in GlobalSuccession operator",
+        ):
+            dyn.simulate_path(
+                initial={"A": "Low", "B": "Low"},
+                constraints=constraints,
+                constraint_mode="repair",
+                succession_operator=DerivedGlobalSuccession(),
+            )
+
+    def test_dynamic_shocks_reject_non_global_succession_in_simulate_path(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1])
+        dynamic_shocks = {1: {("A", "High"): 1.0}}
+        with pytest.raises(
+            ValueError,
+            match="dynamic_shocks_by_period currently supports only the built-in GlobalSuccession operator",
+        ):
+            dyn.simulate_path(
+                initial={"A": "Low", "B": "Low"},
+                dynamic_shocks_by_period=dynamic_shocks,
+                succession_operator=LocalSuccession(),
+            )
+
+    def test_dynamic_tau_rejects_non_global_succession_in_simulate_ensemble(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1, 2])
+        with pytest.raises(
+            ValueError,
+            match="dynamic_tau currently supports only the built-in GlobalSuccession operator",
+        ):
+            dyn.simulate_ensemble(
+                initial={"A": "Low", "B": "Low"},
+                n_runs=2,
+                base_seed=123,
+                dynamic_tau=0.2,
+                succession_operator=LocalSuccession(),
+            )
+
+    def test_dynamic_constraints_repair_returns_only_feasible_scenarios(self) -> None:
+        descriptors = {"Cycle": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        for cycle_state in descriptors["Cycle"]:
+            m.set_impact("Cycle", cycle_state, "B", "Low", 0.0)
+            m.set_impact("Cycle", cycle_state, "B", "High", 1.0)
+        for b_state in descriptors["B"]:
+            m.set_impact("B", b_state, "Cycle", "Low", 0.0)
+            m.set_impact("B", b_state, "Cycle", "High", 1.0)
+
+        dyn = DynamicCIB(m, periods=[1, 2, 3])
+        dyn.add_cyclic_descriptor(
+            CyclicDescriptor(
+                name="Cycle",
+                transition={
+                    "Low": {"High": 1.0},
+                    "High": {"High": 1.0},
+                },
+            )
+        )
+        constraints = [ForbiddenPair("Cycle", "High", "B", "High")]
+        cidx = ConstraintIndex.from_specs(m, constraints)
+        assert cidx is not None
+        p = dyn.simulate_path(
+            initial={"Cycle": "Low", "B": "Low"},
+            constraints=constraints,
+            constraint_mode="repair",
+            constrained_top_k=2,
+            constrained_backtracking_depth=2,
+        )
+        assert all(cidx.is_full_valid(s.to_indices()) for s in p.scenarios)
+
+    def test_dynamic_constraints_first_period_output_mode_initial(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("B", "Low", "A", "Low", 0.0)
+        m.set_impact("B", "Low", "A", "High", 1.0)
+        m.set_impact("B", "High", "A", "Low", 0.0)
+        m.set_impact("B", "High", "A", "High", 1.0)
+
+        dyn = DynamicCIB(m, periods=[1, 2])
+        constraints = [ForbiddenPair("A", "High", "B", "High")]
+        p = dyn.simulate_path(
+            initial={"A": "Low", "B": "High"},
+            constraints=constraints,
+            constraint_mode="repair",
+            first_period_output_mode="initial",
+            constrained_top_k=2,
+            constrained_backtracking_depth=2,
+        )
+        assert p.scenarios[0].to_dict() == {"A": "Low", "B": "High"}
+        assert p.scenarios[1].to_dict() != {"A": "Low", "B": "High"}
+
+    def test_dynamic_constraints_ensemble_reproducible(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("A", "Low", "B", "Low", 2.0)
+        m.set_impact("A", "Low", "B", "High", -2.0)
+        m.set_impact("A", "High", "B", "Low", -2.0)
+        m.set_impact("A", "High", "B", "High", 2.0)
+        m.set_impact("B", "Low", "A", "Low", 2.0)
+        m.set_impact("B", "Low", "A", "High", -2.0)
+        m.set_impact("B", "High", "A", "Low", -2.0)
+        m.set_impact("B", "High", "A", "High", 2.0)
+        dyn = DynamicCIB(m, periods=[1, 2, 3])
+        constraints = [ForbiddenPair("A", "High", "B", "High")]
+        paths1 = dyn.simulate_ensemble(
+            initial={"A": "Low", "B": "Low"},
+            n_runs=8,
+            base_seed=42,
+            constraint_mode="repair",
+            constraints=constraints,
+            constrained_top_k=2,
+            constrained_backtracking_depth=2,
+        )
+        paths2 = dyn.simulate_ensemble(
+            initial={"A": "Low", "B": "Low"},
+            n_runs=8,
+            base_seed=42,
+            constraint_mode="repair",
+            constraints=constraints,
+            constrained_top_k=2,
+            constrained_backtracking_depth=2,
+        )
+        assert [p.to_dicts() for p in paths1] == [p.to_dicts() for p in paths2]
 
