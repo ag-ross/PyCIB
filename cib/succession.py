@@ -10,8 +10,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Optional, Union
+from itertools import combinations, product
+from typing import Dict, List, Mapping, Optional, Union
 
+import numpy as np
+
+from cib.constraints import ConstraintIndex
 from cib.core import CIBMatrix, ImpactBalance, Scenario
 
 
@@ -161,6 +165,162 @@ class GlobalSuccession(SuccessionOperator):
             new_state_dict[descriptor] = max_states[descriptor]
 
         return Scenario(new_state_dict, matrix)
+
+
+class ConstrainedGlobalSuccession(SuccessionOperator):
+    """
+    Global succession operator with optional feasibility-aware repair.
+
+    A global successor is computed first. If infeasibility is detected,
+    a bounded top-k/backtracking search is applied to recover a valid
+    successor that remains as close as possible to the unconstrained
+    impact optimum.
+
+    Repair is global by design: it searches within the global impact-balance
+    optimum subject to feasibility constraints. Dynamic workflows may supply
+    locked descriptor states so the repair search cannot rewrite exogenous
+    states that were fixed for the current period.
+    """
+
+    def __init__(
+        self,
+        constraint_index: ConstraintIndex,
+        *,
+        constraint_mode: str = "strict",
+        constrained_top_k: int = 2,
+        constrained_backtracking_depth: int = 2,
+    ) -> None:
+        self.constraint_index = constraint_index
+        self.constraint_mode = str(constraint_mode).strip().lower()
+        self.constrained_top_k = int(constrained_top_k)
+        self.constrained_backtracking_depth = int(constrained_backtracking_depth)
+        if self.constraint_mode not in {"strict", "repair"}:
+            raise ValueError("constraint_mode must be 'strict' or 'repair'")
+        if self.constrained_top_k <= 0:
+            raise ValueError("constrained_top_k must be positive")
+        if self.constrained_backtracking_depth < 0:
+            raise ValueError("constrained_backtracking_depth must be non-negative")
+
+    def _is_valid(self, scenario: Scenario) -> bool:
+        z = np.asarray(scenario.to_indices(), dtype=np.int64)
+        return bool(self.constraint_index.is_full_valid(z))
+
+    def _repair_to_valid(
+        self,
+        scenario: Scenario,
+        matrix: CIBMatrix,
+        *,
+        locked_states: Optional[Mapping[str, str]] = None,
+    ) -> Optional[Scenario]:
+        balance = ImpactBalance(scenario, matrix)
+        desc_names = list(matrix.descriptors.keys())
+        n_desc = len(desc_names)
+        locked: Dict[str, str] = {
+            str(descriptor): str(state)
+            for descriptor, state in (locked_states or {}).items()
+        }
+        unknown_locked = sorted(set(locked).difference(desc_names))
+        if unknown_locked:
+            raise ValueError(
+                f"locked_states contains unknown descriptors: {unknown_locked}"
+            )
+
+        ranked_options: List[List[str]] = []
+        base_states: List[str] = []
+        mutable_positions: List[int] = []
+        for descriptor in desc_names:
+            if descriptor in locked:
+                locked_state = locked[descriptor]
+                if locked_state not in matrix.descriptors[descriptor]:
+                    raise ValueError(
+                        f"locked_states contains invalid state {locked_state!r} "
+                        f"for descriptor {descriptor!r}"
+                    )
+                ranked_options.append([locked_state])
+                base_states.append(locked_state)
+                continue
+            state_scores = list(balance.balance[descriptor].items())
+            state_scores.sort(key=lambda x: float(x[1]), reverse=True)
+            ranked_states = [state for state, _score in state_scores[: self.constrained_top_k]]
+            if not ranked_states:
+                return None
+            ranked_options.append(ranked_states)
+            base_states.append(ranked_states[0])
+            mutable_positions.append(len(ranked_options) - 1)
+
+        best_candidate: Optional[Scenario] = None
+        best_objective = float("-inf")
+
+        def _build_scenario(state_indices: List[int]) -> Scenario:
+            out = [base_states[i] for i in range(n_desc)]
+            for i, opt_idx in enumerate(state_indices):
+                out[i] = ranked_options[i][opt_idx]
+            return Scenario(dict(zip(desc_names, out)), matrix)
+
+        base_idx = [0 for _ in range(n_desc)]
+        base_scenario = _build_scenario(base_idx)
+        if self._is_valid(base_scenario):
+            return base_scenario
+
+        max_depth = min(int(self.constrained_backtracking_depth), len(mutable_positions))
+        for depth in range(1, max_depth + 1):
+            for changed in combinations(mutable_positions, depth):
+                nonzero_choices = []
+                for d in changed:
+                    k = len(ranked_options[d])
+                    if k <= 1:
+                        nonzero_choices = []
+                        break
+                    nonzero_choices.append(range(1, k))
+                if not nonzero_choices:
+                    continue
+                for picks in product(*nonzero_choices):
+                    state_idx = [0 for _ in range(n_desc)]
+                    for d, pick in zip(changed, picks):
+                        state_idx[d] = int(pick)
+                    candidate = _build_scenario(state_idx)
+                    if not self._is_valid(candidate):
+                        continue
+                    objective = 0.0
+                    for i, descriptor in enumerate(desc_names):
+                        state = candidate.get_state(descriptor)
+                        objective += float(balance.get_score(descriptor, state))
+                    # Deterministic ordering in ties is enforced by lexicographic index vector.
+                    if objective > best_objective:
+                        best_objective = objective
+                        best_candidate = candidate
+                    elif best_candidate is not None and np.isclose(objective, best_objective):
+                        if tuple(candidate.to_indices()) < tuple(best_candidate.to_indices()):
+                            best_candidate = candidate
+        return best_candidate
+
+    def repair_to_valid(
+        self,
+        scenario: Scenario,
+        matrix: CIBMatrix,
+        *,
+        locked_states: Optional[Mapping[str, str]] = None,
+    ) -> Optional[Scenario]:
+        """
+        Return a repaired feasible scenario when possible.
+
+        When `locked_states` is provided, those descriptor assignments are
+        treated as immutable during repair and must be preserved exactly.
+        """
+        return self._repair_to_valid(
+            scenario, matrix, locked_states=locked_states
+        )
+
+    def find_successor(self, scenario: Scenario, matrix: CIBMatrix) -> Scenario:
+        candidate = GlobalSuccession().find_successor(scenario, matrix)
+        if self._is_valid(candidate):
+            return candidate
+        if self.constraint_mode == "strict":
+            raise ValueError("Constraint infeasibility was encountered during succession")
+        repaired = self._repair_to_valid(candidate, matrix)
+        if repaired is None:
+            raise ValueError("Constraint repair failed during succession")
+        return repaired
 
 
 class LocalSuccession(SuccessionOperator):
