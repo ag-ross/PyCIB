@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import multiprocessing as mp
 from time import perf_counter
+import warnings
 from typing import Any, Dict, List, Literal, Mapping, Optional, Protocol, Sequence, Tuple, Union
 
 import numpy as np
@@ -37,6 +38,11 @@ class AttractorKey:
 class MonteCarloAttractorResult:
     """
     Results of Monte Carlo attractor discovery.
+
+    ``weights`` maps each attractor key to ``counts[key] / n_completed`` where
+    ``n_completed`` excludes runs that timed out (succession hit
+    ``max_iterations``). Diagnostics expose both completed-run and
+    requested-run normalization views so conditioning is explicit.
     """
 
     counts: Dict[AttractorKey, int]
@@ -47,6 +53,17 @@ class MonteCarloAttractorResult:
     diagnostics: Dict[str, Any]
     status: str
     runtime_s: float
+
+    def __repr__(self) -> str:
+        d = self.diagnostics
+        return (
+            f"MonteCarloAttractorResult(status={self.status!r}, "
+            f"n_completed_runs={d.get('n_completed_runs')!r}, "
+            f"n_timeouts={d.get('n_timeouts')!r}, "
+            f"fast_scorer_fallback={d.get('fast_scorer_fallback')!r}, "
+            f"intentional_slow_scoring_path={d.get('intentional_slow_scoring_path')!r}, "
+            f"runtime_s={float(self.runtime_s):.4f})"
+        )
 
 
 class _SamplerBackend(Protocol):
@@ -228,15 +245,32 @@ def _run_batch(
     Dict[str, Any],
 ]:
     scorer: Optional[Union[FastCIBScorer, SparseCIBScorer]]
+    fast_scorer_fallback = False
+    fast_scorer_fallback_reason: Optional[str] = None
+    fast_scorer_fallback_exception_type: Optional[str] = None
     if bool(config.use_fast_scoring):
         try:
             if str(config.fast_backend) == "sparse":
                 scorer = SparseCIBScorer.from_matrix(matrix)
             else:
-                scorer = FastCIBScorer.from_matrix(matrix)
-        except Exception:
+                scorer = FastCIBScorer.from_matrix(
+                    matrix,
+                    max_workspace_bytes=config.max_fast_scorer_workspace_bytes,
+                )
+        except Exception as exc:
             if bool(config.strict_fast):
                 raise
+            if not isinstance(exc, (MemoryError, ValueError, TypeError, OSError)):
+                raise
+            fast_scorer_fallback = True
+            fast_scorer_fallback_reason = repr(exc)
+            fast_scorer_fallback_exception_type = str(type(exc).__name__)
+            warnings.warn(
+                "Monte Carlo fast scoring initialization failed; falling back to slow path. "
+                f"reason={type(exc).__name__}: {exc}",
+                UserWarning,
+                stacklevel=2,
+            )
             scorer = None
     else:
         scorer = None
@@ -282,11 +316,17 @@ def _run_batch(
             if str(config.succession) == "global":
                 from cib.succession import GlobalSuccession
 
-                op = GlobalSuccession()
+                op = GlobalSuccession(
+                    float_atol=float(config.float_atol),
+                    float_rtol=float(config.float_rtol),
+                )
             elif str(config.succession) == "local":
                 from cib.succession import LocalSuccession
 
-                op = LocalSuccession()
+                op = LocalSuccession(
+                    float_atol=float(config.float_atol),
+                    float_rtol=float(config.float_rtol),
+                )
             else:
                 raise ValueError("succession must be 'global' or 'local'")
 
@@ -303,7 +343,8 @@ def _run_batch(
             if res_slow.is_cycle:
                 n_cycles += 1
                 cyc = res_slow.attractor
-                assert isinstance(cyc, list)
+                if not isinstance(cyc, list):
+                    raise TypeError("cycle attractor must be a list of scenarios")
                 cycle_idx = [tuple(s.to_indices()) for s in cyc]
                 cycle_key = _cycle_key_from_mode(
                     rng,
@@ -322,7 +363,8 @@ def _run_batch(
                 continue
 
             attractor = res_slow.attractor
-            assert isinstance(attractor, Scenario)
+            if not isinstance(attractor, Scenario):
+                raise TypeError("fixed-point attractor must be a Scenario")
             fixed_key = AttractorKey(kind="fixed", value=tuple(attractor.to_indices()))
             counts[fixed_key] = int(counts.get(fixed_key, 0)) + 1
             continue
@@ -339,6 +381,8 @@ def _run_batch(
                 initial_z_idx=z0,
                 rule=str(config.succession),
                 max_iterations=int(config.max_iterations),
+                float_atol=float(config.float_atol),
+                float_rtol=float(config.float_rtol),
             )
         except RuntimeError:
             n_timeouts += 1
@@ -349,7 +393,8 @@ def _run_batch(
         if res.is_cycle:
             n_cycles += 1
             cycle = res.attractor
-            assert isinstance(cycle, tuple)
+            if not isinstance(cycle, tuple):
+                raise TypeError("cycle attractor indices must be a tuple")
             cycle_key = _cycle_key_from_mode(
                 rng,
                 cycle,
@@ -367,7 +412,8 @@ def _run_batch(
             continue
 
         attractor = res.attractor
-        assert isinstance(attractor, tuple)
+        if not isinstance(attractor, tuple):
+            raise TypeError("fixed-point attractor indices must be a tuple")
         fixed_key = AttractorKey(kind="fixed", value=tuple(attractor))
         counts[fixed_key] = int(counts.get(fixed_key, 0)) + 1
 
@@ -376,7 +422,18 @@ def _run_batch(
         "n_timeouts": int(n_timeouts),
         "n_cycles": int(n_cycles),
         "mean_iterations": float(total_iters / max(1, (len(run_seeds) - n_timeouts))),
+        "fast_scorer_fallback": bool(fast_scorer_fallback),
+        "intentional_slow_scoring_path": not bool(config.use_fast_scoring),
+        "float_atol": float(config.float_atol),
+        "float_rtol": float(config.float_rtol),
     }
+    if fast_scorer_fallback_reason is not None:
+        diag["fast_scorer_fallback_reason"] = str(fast_scorer_fallback_reason)
+    if fast_scorer_fallback_exception_type is not None:
+        diag["fallback_exception_type"] = str(fast_scorer_fallback_exception_type)
+        diag["fallback_stage"] = "fast_scorer_initialization"
+        diag["fallback_from"] = "fast_scorer"
+        diag["fallback_to"] = "slow_succession_path"
     return counts, cycles, diag
 
 
@@ -416,12 +473,23 @@ def _merge_diagnostics(parts: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         mean = float(p.get("mean_iterations", 0.0))
         total_iters_weighted += float(n) * float(mean)
     mean_iters = float(total_iters_weighted / max(1, n_completed))
-    return {
+    fast_fb = any(bool(p.get("fast_scorer_fallback")) for p in parts)
+    out: Dict[str, Any] = {
         "n_completed_runs": int(n_completed),
         "n_timeouts": int(n_timeouts),
         "n_cycles": int(n_cycles),
         "mean_iterations": float(mean_iters),
+        "fast_scorer_fallback": bool(fast_fb),
+        "intentional_slow_scoring_path": bool(
+            parts and parts[0].get("intentional_slow_scoring_path")
+        ),
     }
+    for p in parts:
+        r = p.get("fast_scorer_fallback_reason")
+        if r:
+            out["fast_scorer_fallback_reason"] = str(r)
+            break
+    return out
 
 
 def find_attractors_monte_carlo(
@@ -431,6 +499,12 @@ def find_attractors_monte_carlo(
 ) -> MonteCarloAttractorResult:
     """
     Monte Carlo attractor discovery is performed.
+
+    Reported ``weights`` are normalized over **completed** runs only; timed-out
+    runs (see ``diagnostics['n_timeouts']``) are excluded from that denominator.
+    Diagnostics also include requested-run-normalized frequencies. Configure
+    ``fail_on_timeout`` and ``min_completion_fraction`` for stricter completion
+    quality requirements.
     """
     config.validate()
     t0 = perf_counter()
@@ -458,8 +532,31 @@ def find_attractors_monte_carlo(
         diag = _merge_diagnostics(diag_parts)
 
     runtime_s = float(perf_counter() - t0)
-    n_eff = int(diag.get("n_completed_runs", 0))
+    n_runs_cfg = int(config.runs)
+    n_completed = int(diag.get("n_completed_runs", 0))
+    n_timeouts = int(diag.get("n_timeouts", 0))
+    if bool(config.fail_on_timeout) and n_timeouts > 0:
+        raise RuntimeError(
+            "Monte Carlo attractor discovery: fail_on_timeout is True but "
+            f"n_timeouts={n_timeouts} (completed={n_completed}, runs={n_runs_cfg}). "
+            "Increase max_iterations or runs, or disable fail_on_timeout."
+        )
+    if config.min_completion_fraction is not None:
+        frac = float(n_completed) / float(max(1, n_runs_cfg))
+        need = float(config.min_completion_fraction)
+        if frac + 1e-15 < need:
+            raise RuntimeError(
+                "Monte Carlo attractor discovery: completion fraction "
+                f"{frac:.6g} is below min_completion_fraction={need:.6g} "
+                f"(completed={n_completed}, n_timeouts={n_timeouts}, runs={n_runs_cfg})."
+            )
+
+    n_eff = n_completed
     weights = {k: float(v) / float(max(1, n_eff)) for k, v in counts.items()}
+    weights_over_requested_runs = {
+        k: float(v) / float(max(1, n_runs_cfg)) for k, v in counts.items()
+    }
+    completion_fraction = float(n_completed) / float(max(1, n_runs_cfg))
     ranked = tuple(
         sorted(
             counts.keys(),
@@ -473,12 +570,34 @@ def find_attractors_monte_carlo(
             if key.kind != "fixed":
                 continue
             v = key.value
-            assert isinstance(v, tuple)
+            if not isinstance(v, tuple):
+                raise TypeError("fixed attractor key value must be a tuple of indices")
             top_attractors.append(Scenario(list(v), matrix))
 
-    status = "ok" if counts else "no_attractors"
+    completion_target = float(config.completion_status_target_fraction)
+    if n_completed <= 0:
+        status = "incomplete"
+    elif completion_fraction + 1e-15 < completion_target:
+        status = "partial_timeout" if counts else "incomplete"
+    else:
+        status = "ok" if counts else "no_attractors"
     diagnostics = dict(diag)
     diagnostics["runs"] = int(config.runs)
+    diagnostics["requested_runs"] = int(config.runs)
+    diagnostics["weights_normalization"] = "completed_runs_only"
+    diagnostics["weights_requested_runs"] = dict(weights_over_requested_runs)
+    diagnostics["weights_requested_runs_serialized"] = {
+        repr(k): float(v) for k, v in weights_over_requested_runs.items()
+    }
+    diagnostics["requested_runs_normalization"] = "requested_runs"
+    diagnostics["completion_fraction"] = float(completion_fraction)
+    diagnostics["completion_status_target_fraction"] = float(completion_target)
+    diagnostics["status_interpretation"] = (
+        "ok: completion meets target and attractors found; "
+        "no_attractors: completion meets target but none found; "
+        "partial_timeout: attractors found but completion below target; "
+        "incomplete: completion below target with no attractor evidence from completed runs."
+    )
     diagnostics["seed"] = int(config.seed)
     diagnostics["succession"] = str(config.succession)
     diagnostics["runtime_s"] = float(runtime_s)

@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from itertools import product
 from time import perf_counter
+import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -59,19 +60,61 @@ def _descriptor_order(matrix: CIBMatrix, *, ordering: str, seed: int) -> List[in
     raise ValueError("ordering must be 'given', 'random', or 'connectivity'")
 
 
-def _bruteforce_consistent(matrix: CIBMatrix) -> List[Scenario]:
+def _scenario_space_size(matrix: CIBMatrix) -> int:
+    space_size = 1
+    for n in matrix.state_counts:
+        space_size *= int(n)
+    return int(space_size)
+
+
+def _bruteforce_consistent(
+    matrix: CIBMatrix,
+    *,
+    cidx: Optional[ConstraintIndex],
+    time_limit_s: Optional[float],
+    max_solutions: Optional[int],
+    float_atol: float,
+    float_rtol: float,
+) -> Tuple[List[Scenario], str, bool, Dict[str, Any]]:
     """
     A slow brute-force fallback is provided.
     """
     desc_names = list(matrix.descriptors.keys())
     state_lists = [matrix.descriptors[d] for d in desc_names]
     out: List[Scenario] = []
+    started_at = perf_counter()
+    checked = 0
+    constraint_pruned = 0
+    status = "ok"
+    is_complete = True
     for comb in product(*state_lists):
+        if time_limit_s is not None and (perf_counter() - started_at) >= float(time_limit_s):
+            status = "timeout"
+            is_complete = False
+            break
+        if max_solutions is not None and len(out) >= int(max_solutions):
+            status = "max_solutions"
+            is_complete = False
+            break
         sdict = dict(zip(desc_names, comb))
         s = Scenario(sdict, matrix)
-        if ConsistencyChecker.check_consistency(s, matrix):
+        checked += 1
+        z = np.array(s.to_indices(), dtype=np.int64)
+        if cidx is not None and not bool(cidx.is_full_valid(z)):
+            constraint_pruned += 1
+            continue
+        if ConsistencyChecker.check_consistency(
+            s,
+            matrix,
+            float_atol=float(float_atol),
+            float_rtol=float(float_rtol),
+        ):
             out.append(s)
-    return out
+    diagnostics = {
+        "nodes_visited": int(checked),
+        "constraint_pruned_nodes": int(constraint_pruned),
+    }
+    return out, str(status), bool(is_complete), diagnostics
 
 
 def find_all_consistent_exact(
@@ -80,28 +123,97 @@ def find_all_consistent_exact(
     config: ExactSolverConfig,
 ) -> ExactSolverResult:
     """
-    Enumerate consistent scenarios exactly using a pruned search.
+    Enumerate consistent scenarios using a pruned search (or bruteforce fallback).
+
+    Always check :attr:`ExactSolverResult.is_complete` and ``status``: timeouts
+    and ``max_solutions`` caps can return **partial** results. Bruteforce fallback
+    for large scenario spaces requires ``ExactSolverConfig.allow_bruteforce=True``.
     """
     config.validate()
     t0 = perf_counter()
 
+    fast_scorer_fallback = False
+    fast_scorer_fallback_reason: Optional[str] = None
+    fast_scorer_fallback_exception_type: Optional[str] = None
     try:
-        scorer = FastCIBScorer.from_matrix(matrix) if bool(config.use_fast_scoring) else None
-    except Exception:
+        scorer = (
+            FastCIBScorer.from_matrix(
+                matrix, max_workspace_bytes=int(config.max_delta_array_bytes)
+            )
+            if bool(config.use_fast_scoring)
+            else None
+        )
+    except Exception as exc:
         if bool(config.strict_fast):
             raise
+        if not isinstance(exc, (MemoryError, ValueError, TypeError, OSError)):
+            raise
+        fast_scorer_fallback = True
+        fast_scorer_fallback_reason = repr(exc)
+        fast_scorer_fallback_exception_type = str(type(exc).__name__)
+        warnings.warn(
+            "Exact solver fast scoring initialization failed; falling back to slow path. "
+            f"reason={type(exc).__name__}: {exc}",
+            UserWarning,
+            stacklevel=2,
+        )
         scorer = None
 
     cidx = ConstraintIndex.from_specs(matrix, config.constraints)
 
     if scorer is None:
-        scenarios = tuple(_bruteforce_consistent(matrix))
+        total_space = _scenario_space_size(matrix)
+        if (
+            total_space > int(config.bruteforce_max_scenarios)
+            and not bool(config.allow_bruteforce)
+        ):
+            if not bool(config.use_fast_scoring):
+                raise ValueError(
+                    f"Exact solver would enumerate {total_space} scenarios via bruteforce "
+                    f"(use_fast_scoring=False), which exceeds "
+                    f"bruteforce_max_scenarios={config.bruteforce_max_scenarios}. "
+                    "Set ExactSolverConfig.allow_bruteforce=True to proceed (unsafe for large "
+                    "spaces), or reduce the problem / raise bruteforce_max_scenarios."
+                )
+            raise ValueError(
+                f"Exact solver would enumerate {total_space} scenarios via bruteforce after "
+                f"fast scorer failure, which exceeds "
+                f"bruteforce_max_scenarios={config.bruteforce_max_scenarios}. "
+                "Set ExactSolverConfig.allow_bruteforce=True to proceed (unsafe for large "
+                "spaces), fix the fast-scorer error, or use strict_fast=True to surface it."
+            )
+        max_solutions = int(config.max_solutions) if config.max_solutions is not None else None
+        time_limit_s = float(config.time_limit_s) if config.time_limit_s is not None else None
+        bf_solutions, bf_status, bf_is_complete, bf_metrics = _bruteforce_consistent(
+            matrix,
+            cidx=cidx,
+            time_limit_s=time_limit_s,
+            max_solutions=max_solutions,
+            float_atol=float(config.float_atol),
+            float_rtol=float(config.float_rtol),
+        )
+        scenarios = tuple(bf_solutions)
         runtime_s = float(perf_counter() - t0)
+        bf_diag: Dict[str, Any] = {
+            "fallback": "bruteforce",
+            "fast_scorer_fallback": bool(fast_scorer_fallback),
+            "intentional_slow_scoring_path": not bool(config.use_fast_scoring),
+            "fallback_stage": "fast_scorer_initialization",
+            "fallback_from": "fast_scorer",
+            "fallback_to": "bruteforce",
+            "float_atol": float(config.float_atol),
+            "float_rtol": float(config.float_rtol),
+        }
+        bf_diag.update(bf_metrics)
+        if fast_scorer_fallback_reason is not None:
+            bf_diag["fast_scorer_fallback_reason"] = str(fast_scorer_fallback_reason)
+        if fast_scorer_fallback_exception_type is not None:
+            bf_diag["fallback_exception_type"] = str(fast_scorer_fallback_exception_type)
         return ExactSolverResult(
             scenarios=scenarios,
-            status="ok",
-            is_complete=True,
-            diagnostics={"fallback": "bruteforce"},
+            status=str(bf_status),
+            is_complete=bool(bf_is_complete),
+            diagnostics=bf_diag,
             runtime_s=float(runtime_s),
         )
 
@@ -110,6 +222,20 @@ def find_all_consistent_exact(
 
     max_states = int(scorer.max_states)
     impact = scorer.impact
+
+    delta_nbytes = (
+        int(n_desc)
+        * int(n_desc)
+        * int(max_states)
+        * int(max_states)
+        * int(np.dtype(np.float64).itemsize)
+    )
+    if delta_nbytes > int(config.max_delta_array_bytes):
+        raise ValueError(
+            f"delta_max workspace would require ~{delta_nbytes} bytes "
+            f"(limit max_delta_array_bytes={config.max_delta_array_bytes}). "
+            "Reduce descriptor count or max descriptor cardinality, or raise the limit explicitly."
+        )
 
     # Precompute per-unassigned-descriptor maximum advantage contributions:
     # delta_max[u, j, c, l] = max_k impact[u, k, j, c] - impact[u, k, j, l]
@@ -224,7 +350,16 @@ def find_all_consistent_exact(
         "constraint_pruned_nodes": int(constraint_pruned_nodes),
         "ordering": str(config.ordering),
         "bound": str(config.bound),
+        "fast_scorer_fallback": bool(fast_scorer_fallback),
+        "intentional_slow_scoring_path": False,
     }
+    if fast_scorer_fallback_reason is not None:
+        diagnostics["fast_scorer_fallback_reason"] = str(fast_scorer_fallback_reason)
+    if fast_scorer_fallback_exception_type is not None:
+        diagnostics["fallback_exception_type"] = str(fast_scorer_fallback_exception_type)
+        diagnostics["fallback_stage"] = "fast_scorer_initialization"
+        diagnostics["fallback_from"] = "fast_scorer"
+        diagnostics["fallback_to"] = "pruned_exact_search"
     return ExactSolverResult(
         scenarios=tuple(solutions),
         status=str(status),

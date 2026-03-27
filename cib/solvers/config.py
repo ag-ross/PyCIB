@@ -26,6 +26,13 @@ SolverMode = Literal[
 class MonteCarloAttractorConfig:
     """
     Configuration for Monte Carlo attractor discovery.
+
+    Weights in :class:`MonteCarloAttractorResult` are ``count / n_completed``:
+    runs that hit the succession iteration limit (timeouts) are omitted from
+    the denominator, so reported frequencies are conditional on completed runs.
+    A robust default completion check is enabled via
+    ``min_completion_fraction=0.995``; callers can override this threshold (or
+    set it to ``None`` to disable threshold checks).
     """
 
     runs: int = 10_000
@@ -48,12 +55,17 @@ class MonteCarloAttractorConfig:
     use_fast_scoring: bool = True
     strict_fast: bool = False
     fast_backend: Literal["dense", "sparse"] = "dense"
+    max_fast_scorer_workspace_bytes: Optional[int] = None
 
     result_storage: Literal["counts_only", "topk_scenarios"] = "counts_only"
     top_k: int = 50
 
     float_atol: float = 1e-08
     float_rtol: float = 1e-05
+
+    fail_on_timeout: bool = False
+    min_completion_fraction: Optional[float] = 0.995
+    completion_status_target_fraction: float = 0.995
 
     def validate(self) -> None:
         """
@@ -69,6 +81,10 @@ class MonteCarloAttractorConfig:
             raise ValueError("top_k must be positive")
         if float(self.float_atol) < 0.0 or float(self.float_rtol) < 0.0:
             raise ValueError("float_atol and float_rtol must be non-negative")
+        if self.max_fast_scorer_workspace_bytes is not None and int(
+            self.max_fast_scorer_workspace_bytes
+        ) < 0:
+            raise ValueError("max_fast_scorer_workspace_bytes must be non-negative if set")
 
         if str(self.bitgen) != "PCG64":
             raise ValueError("bitgen is not recognised")
@@ -90,6 +106,16 @@ class MonteCarloAttractorConfig:
                     "sampler_weights must be provided when sampler is 'weighted'"
                 )
 
+        if self.min_completion_fraction is not None:
+            f = float(self.min_completion_fraction)
+            if f <= 0.0 or f > 1.0:
+                raise ValueError(
+                    "min_completion_fraction must be in (0, 1] when specified"
+                )
+        f_status = float(self.completion_status_target_fraction)
+        if f_status <= 0.0 or f_status > 1.0:
+            raise ValueError("completion_status_target_fraction must be in (0, 1]")
+
 
 @dataclass(frozen=True)
 class ExactSolverConfig:
@@ -105,6 +131,9 @@ class ExactSolverConfig:
 
     use_fast_scoring: bool = True
     strict_fast: bool = False
+    allow_bruteforce: bool = False
+    bruteforce_max_scenarios: int = 50_000
+    max_delta_array_bytes: int = 512 * 1024 * 1024
 
     float_atol: float = 1e-08
     float_rtol: float = 1e-05
@@ -122,6 +151,10 @@ class ExactSolverConfig:
             raise ValueError("time_limit_s must be positive when provided")
         if float(self.float_atol) < 0.0 or float(self.float_rtol) < 0.0:
             raise ValueError("float_atol and float_rtol must be non-negative")
+        if int(self.bruteforce_max_scenarios) <= 0:
+            raise ValueError("bruteforce_max_scenarios must be positive")
+        if int(self.max_delta_array_bytes) <= 0:
+            raise ValueError("max_delta_array_bytes must be positive")
 
 
 @dataclass(frozen=True)
