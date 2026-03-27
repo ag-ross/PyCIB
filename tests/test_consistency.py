@@ -98,3 +98,51 @@ class TestConsistencyChecker:
         is_consistent = ConsistencyChecker.check_consistency(scenario, matrix)
 
         assert is_consistent is True
+
+    def test_detailed_consistency_respects_tolerance_near_tie(self) -> None:
+        """Detailed helper should respect caller-provided floating tolerances."""
+        descriptors = {"A": ["a0", "a1"], "B": ["b0", "b1"]}
+        matrix = CIBMatrix(descriptors)
+        matrix.set_impact("A", "a0", "B", "b0", 1.0)
+        matrix.set_impact("A", "a0", "B", "b1", 1.0 + 5e-9)
+
+        scenario = Scenario({"A": "a0", "B": "b0"}, matrix)
+        strict = ConsistencyChecker.check_consistency_detailed(
+            scenario,
+            matrix,
+            float_atol=0.0,
+            float_rtol=0.0,
+        )
+        tolerant = ConsistencyChecker.check_consistency_detailed(
+            scenario,
+            matrix,
+            float_atol=1e-8,
+            float_rtol=0.0,
+        )
+
+        assert strict["is_consistent"] is False
+        assert tolerant["is_consistent"] is True
+
+    def test_find_inconsistent_descriptors_respects_tolerance_near_tie(self) -> None:
+        """Inconsistent descriptor helper should use provided tolerances."""
+        descriptors = {"A": ["a0", "a1"], "B": ["b0", "b1"]}
+        matrix = CIBMatrix(descriptors)
+        matrix.set_impact("A", "a0", "B", "b0", 1.0)
+        matrix.set_impact("A", "a0", "B", "b1", 1.0 + 5e-9)
+
+        scenario = Scenario({"A": "a0", "B": "b0"}, matrix)
+        strict = ConsistencyChecker.find_inconsistent_descriptors(
+            scenario,
+            matrix,
+            float_atol=0.0,
+            float_rtol=0.0,
+        )
+        tolerant = ConsistencyChecker.find_inconsistent_descriptors(
+            scenario,
+            matrix,
+            float_atol=1e-8,
+            float_rtol=0.0,
+        )
+
+        assert "B" in strict
+        assert "B" not in tolerant

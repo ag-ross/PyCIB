@@ -5,6 +5,7 @@ Tests CIBMatrix, Scenario, ConsistencyChecker, and ImpactBalance classes
 for correct initialization, data access, and basic operations.
 """
 
+import numpy as np
 import pytest
 
 from cib.core import CIBMatrix, ConsistencyChecker, ImpactBalance, Scenario
@@ -104,6 +105,25 @@ class TestCIBMatrix:
         assert balance["Weak"] == 2.0
         assert balance["Strong"] == -2.0
 
+    def test_initialization_copies_descriptor_state_lists(self) -> None:
+        """Test descriptor state lists are isolated from caller mutation."""
+        descriptors = {"A": ["Low", "High"], "B": ["Weak", "Strong"]}
+        matrix = CIBMatrix(descriptors)
+
+        descriptors["A"][0] = "MUTATED"
+
+        assert matrix.descriptors["A"][0] == "Low"
+        assert matrix.get_impact("A", "Low", "B", "Weak") == 0.0
+
+    def test_standardize_uses_full_group_semantics(self) -> None:
+        """Test standardize treats implicit cells as zeros."""
+        matrix = CIBMatrix({"A": ["a0"], "B": ["b0", "b1"]})
+        matrix.set_impact("A", "a0", "B", "b0", 2.0)
+        matrix.standardize()
+
+        assert matrix.get_impact("A", "a0", "B", "b0") == pytest.approx(1.0)
+        assert matrix.get_impact("A", "a0", "B", "b1") == pytest.approx(-1.0)
+
 
 class TestScenario:
     """Test suite for Scenario class."""
@@ -170,6 +190,46 @@ class TestScenario:
 
         scenario_set = {scenario1, scenario2}
         assert len(scenario_set) == 1
+
+    def test_scenario_keeps_isolated_descriptor_state_mapping(self) -> None:
+        """Test scenario label lookup is stable after descriptor list mutation."""
+        descriptors = {"A": ["Low", "High"], "B": ["Weak", "Strong"]}
+        matrix = CIBMatrix(descriptors)
+        scenario = Scenario({"A": "Low", "B": "Strong"}, matrix)
+
+        descriptors["A"][0] = "MUTATED"
+        matrix.descriptors["B"][1] = "CHANGED"
+
+        assert scenario.get_state("A") == "Low"
+        assert scenario.get_state("B") == "Strong"
+
+    def test_initialization_from_dict_rejects_unknown_descriptor_keys(self) -> None:
+        """Test unknown descriptor keys are rejected explicitly."""
+        descriptors = {"A": ["Low", "High"], "B": ["Weak", "Strong"]}
+        matrix = CIBMatrix(descriptors)
+
+        with pytest.raises(ValueError, match="Unknown descriptor keys"):
+            Scenario({"A": "Low", "B": "Weak", "C": "Extra"}, matrix)
+
+    def test_initialization_from_indices_rejects_non_integers(self) -> None:
+        """Test non-integer list entries are rejected."""
+        descriptors = {"A": ["Low", "High"], "B": ["Weak", "Strong"]}
+        matrix = CIBMatrix(descriptors)
+
+        with pytest.raises(ValueError, match="must be an integer"):
+            Scenario([0.0, 1], matrix)
+        with pytest.raises(ValueError, match="must be an integer"):
+            Scenario(["0", 1], matrix)
+        with pytest.raises(ValueError, match="must be an integer"):
+            Scenario([True, 1], matrix)
+
+    def test_initialization_from_indices_accepts_numpy_integers(self) -> None:
+        """Test NumPy integer types are accepted and normalized."""
+        descriptors = {"A": ["Low", "High"], "B": ["Weak", "Strong"]}
+        matrix = CIBMatrix(descriptors)
+
+        scenario = Scenario([np.int64(0), np.int32(1)], matrix)
+        assert scenario.to_indices() == [0, 1]
 
 
 class TestImpactBalance:

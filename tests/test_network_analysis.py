@@ -8,7 +8,7 @@ deterministic fixtures.
 import pytest
 
 from cib.core import CIBMatrix, Scenario
-from cib.network_analysis import NetworkAnalyzer, NetworkGraphBuilder
+from cib.network_analysis import ImpactPathwayAnalyzer, NetworkAnalyzer, NetworkGraphBuilder
 
 
 def _toy_chain_matrix() -> CIBMatrix:
@@ -71,7 +71,7 @@ class TestNetworkAnalyzer:
     """Test suite for NetworkAnalyzer class."""
 
     def test_compute_centrality_measures_orders_chain_center_highest(self) -> None:
-        """Compute centrality measures with highest degree for chain center."""
+        """Centrality measures with highest degree for chain centre are computed."""
         matrix = _toy_chain_matrix()
         analyzer = NetworkAnalyzer(matrix)
         measures = analyzer.compute_centrality_measures()
@@ -87,6 +87,78 @@ class TestNetworkAnalyzer:
         paths = analyzer.find_impact_pathways("A", "C", max_length=3)
 
         assert paths == [["A", "B", "C"]]
+
+    def test_find_impact_pathways_respects_max_paths_metadata(self) -> None:
+        """Bound path enumeration and expose truncation metadata."""
+        descriptors = {"A": ["L", "H"], "B": ["L", "H"], "C": ["L", "H"], "D": ["L", "H"]}
+        matrix = CIBMatrix(descriptors)
+        for src in descriptors:
+            for tgt in descriptors:
+                if src == tgt:
+                    continue
+                for s_src in descriptors[src]:
+                    for s_tgt in descriptors[tgt]:
+                        matrix.set_impact(src, s_src, tgt, s_tgt, 1.0)
+        analyzer = NetworkAnalyzer(matrix)
+        paths, meta = analyzer.find_impact_pathways(
+            "A",
+            "D",
+            max_length=3,
+            max_paths=2,
+            return_metadata=True,
+        )
+
+        assert len(paths) <= 2
+        assert meta["truncated_by_max_paths"] is True
+        assert meta["is_complete"] is False
+        assert int(meta["enumerated_paths"]) >= len(paths)
+
+    def test_find_impact_pathways_respects_time_limit_metadata(self) -> None:
+        """Time-limited search should return truncation metadata."""
+        descriptors = {"A": ["L", "H"], "B": ["L", "H"], "C": ["L", "H"], "D": ["L", "H"]}
+        matrix = CIBMatrix(descriptors)
+        for src in descriptors:
+            for tgt in descriptors:
+                if src == tgt:
+                    continue
+                for s_src in descriptors[src]:
+                    for s_tgt in descriptors[tgt]:
+                        matrix.set_impact(src, s_src, tgt, s_tgt, 1.0)
+        analyzer = NetworkAnalyzer(matrix)
+        _paths, meta = analyzer.find_impact_pathways(
+            "A",
+            "D",
+            max_length=3,
+            time_limit_s=0.0,
+            return_metadata=True,
+        )
+
+        assert meta["truncated_by_time_limit"] is True
+        assert meta["is_complete"] is False
+
+    def test_find_strongest_pathways_respects_bounds_and_metadata(self) -> None:
+        """Strongest-path API should expose bounded truncation metadata."""
+        descriptors = {"A": ["L", "H"], "B": ["L", "H"], "C": ["L", "H"], "D": ["L", "H"]}
+        matrix = CIBMatrix(descriptors)
+        for src in descriptors:
+            for tgt in descriptors:
+                if src == tgt:
+                    continue
+                for s_src in descriptors[src]:
+                    for s_tgt in descriptors[tgt]:
+                        matrix.set_impact(src, s_src, tgt, s_tgt, 1.0)
+
+        pathway_analyzer = ImpactPathwayAnalyzer(matrix)
+        top_paths, meta = pathway_analyzer.find_strongest_pathways(
+            n=3,
+            max_length=3,
+            max_paths=2,
+            return_metadata=True,
+        )
+
+        assert len(top_paths) <= 2
+        assert meta["truncated_by_max_paths"] is True
+        assert int(meta["enumerated_paths"]) >= len(top_paths)
 
     def test_find_impact_pathways_invalid_descriptor_raises(self) -> None:
         """Raise ValueError for unknown source or target."""

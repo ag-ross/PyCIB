@@ -169,3 +169,41 @@ class TestInvarianceOperations:
             tuple(attr.to_dict().items()) for attr in modified_attractors
         }
         assert original_states == modified_states
+
+    def test_standardize_is_invariant_to_sparse_vs_explicit_zero(self) -> None:
+        """Test standardise output is independent of sparse representation."""
+        descriptors = {"A": ["Low", "High"], "B": ["Weak", "Strong"]}
+        sparse = CIBMatrix(descriptors)
+        dense = CIBMatrix(descriptors)
+
+        sparse.set_impact("A", "Low", "B", "Weak", 2.0)
+        sparse.set_impact("B", "Strong", "A", "High", -1.0)
+
+        dense.set_impact("A", "Low", "B", "Weak", 2.0)
+        dense.set_impact("A", "Low", "B", "Strong", 0.0)
+        dense.set_impact("A", "High", "B", "Weak", 0.0)
+        dense.set_impact("A", "High", "B", "Strong", 0.0)
+        dense.set_impact("B", "Weak", "A", "Low", 0.0)
+        dense.set_impact("B", "Weak", "A", "High", 0.0)
+        dense.set_impact("B", "Strong", "A", "Low", 0.0)
+        dense.set_impact("B", "Strong", "A", "High", -1.0)
+
+        sparse.standardize()
+        dense.standardize()
+
+        for src_desc in descriptors:
+            for src_state in descriptors[src_desc]:
+                for tgt_desc in descriptors:
+                    if src_desc == tgt_desc:
+                        continue
+                    vals_sparse = []
+                    vals_dense = []
+                    for tgt_state in descriptors[tgt_desc]:
+                        vals_sparse.append(
+                            sparse.get_impact(src_desc, src_state, tgt_desc, tgt_state)
+                        )
+                        vals_dense.append(
+                            dense.get_impact(src_desc, src_state, tgt_desc, tgt_state)
+                        )
+                    assert sum(vals_sparse) == pytest.approx(0.0)
+                    assert vals_sparse == pytest.approx(vals_dense)

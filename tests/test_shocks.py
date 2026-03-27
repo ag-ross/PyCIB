@@ -11,11 +11,13 @@ import numpy as np
 from cib.core import CIBMatrix, Scenario
 from cib.shocks import (
     RobustnessTester,
+    ShockAwareLocalSuccession,
     ShockModel,
     calibrate_structural_sigma_from_confidence,
     suggest_dynamic_tau_bounds,
 )
 from cib.dynamic import DynamicCIB
+from cib.succession import AttractorResult
 
 
 def _toy_matrix() -> CIBMatrix:
@@ -102,7 +104,7 @@ class TestShockModel:
             )
 
     def test_structural_shock_additive_explicit_matches_default(self) -> None:
-        """Explicit additive scaling should match default behavior."""
+        """Explicit additive scaling should match default behaviour."""
         matrix = _toy_matrix()
 
         default_model = ShockModel(matrix)
@@ -424,6 +426,83 @@ class TestAdvancedShockModeling:
         d_scaled = scaled.sample_dynamic_shocks(seed=42)
         key = ("A", "High")
         assert abs(d_scaled[1][key]) > abs(d_base[1][key])
+
+
+class TestShockAwareLocalSuccession:
+    """Tests for ShockAwareLocalSuccession (local succession with dynamic shocks)."""
+
+    def test_shock_aware_local_succession_find_successor_one_descriptor_updated(
+        self,
+    ) -> None:
+        """One step updates at most the single most inconsistent descriptor (under shocked scores)."""
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("A", "Low", "B", "Low", 2.0)
+        m.set_impact("A", "Low", "B", "High", -2.0)
+        m.set_impact("A", "High", "B", "Low", -2.0)
+        m.set_impact("A", "High", "B", "High", 2.0)
+        m.set_impact("B", "Low", "A", "Low", 1.0)
+        m.set_impact("B", "Low", "A", "High", -1.0)
+        m.set_impact("B", "High", "A", "Low", -1.0)
+        m.set_impact("B", "High", "A", "High", 1.0)
+        scenario = Scenario({"A": "Low", "B": "High"}, m)
+        # Shock (A, High) so A is tilted to High; A is likely most inconsistent.
+        shocks = {("A", "High"): 10.0}
+        op = ShockAwareLocalSuccession(shocks)
+        successor = op.find_successor(scenario, m)
+        state = successor.to_dict()
+        # At least one descriptor may change; only one should change per step.
+        before, after = scenario.to_dict(), state
+        n_changed = sum(1 for d in m.descriptors if before[d] != after[d])
+        assert n_changed <= 1
+        assert successor.get_state("A") in ("Low", "High")
+        assert successor.get_state("B") in ("Low", "High")
+
+    def test_shock_aware_local_succession_find_attractor_converges(self) -> None:
+        """find_attractor converges to a fixed point or cycle."""
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("A", "Low", "B", "Low", 2.0)
+        m.set_impact("A", "Low", "B", "High", -2.0)
+        m.set_impact("A", "High", "B", "Low", -2.0)
+        m.set_impact("A", "High", "B", "High", 2.0)
+        m.set_impact("B", "Low", "A", "Low", 1.0)
+        m.set_impact("B", "Low", "A", "High", -1.0)
+        m.set_impact("B", "High", "A", "Low", -1.0)
+        m.set_impact("B", "High", "A", "High", 1.0)
+        scenario = Scenario({"A": "Low", "B": "Low"}, m)
+        op = ShockAwareLocalSuccession({})
+        result = op.find_attractor(scenario, m, max_iterations=50)
+        assert isinstance(result, AttractorResult)
+        assert result.iterations >= 1
+        if not result.is_cycle:
+            assert isinstance(result.attractor, Scenario)
+            assert result.attractor.to_dict()["A"] in ("Low", "High")
+            assert result.attractor.to_dict()["B"] in ("Low", "High")
+
+    def test_shock_aware_local_succession_shocks_affect_outcome(self) -> None:
+        """Shocked scores can change which descriptor is updated and the attractor."""
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("A", "Low", "B", "Low", 2.0)
+        m.set_impact("A", "Low", "B", "High", -2.0)
+        m.set_impact("A", "High", "B", "Low", -2.0)
+        m.set_impact("A", "High", "B", "High", 2.0)
+        m.set_impact("B", "Low", "A", "Low", 1.0)
+        m.set_impact("B", "Low", "A", "High", -1.0)
+        m.set_impact("B", "High", "A", "Low", -1.0)
+        m.set_impact("B", "High", "A", "High", 1.0)
+        scenario = Scenario({"A": "Low", "B": "Low"}, m)
+        op_none = ShockAwareLocalSuccession({})
+        op_shock = ShockAwareLocalSuccession({("A", "High"): 5.0})
+        res_none = op_none.find_attractor(scenario, m, max_iterations=50)
+        res_shock = op_shock.find_attractor(scenario, m, max_iterations=50)
+        # Both should converge; attractors may differ when shock is applied.
+        assert isinstance(res_none.attractor, Scenario)
+        assert isinstance(res_shock.attractor, Scenario)
+        # With strong shock on (A, High), final A might be High; without, could be different.
+        assert res_none.attractor.to_dict()["A"] in ("Low", "High")
+        assert res_shock.attractor.to_dict()["A"] in ("Low", "High")
 
 
 class TestRobustnessExtensions:

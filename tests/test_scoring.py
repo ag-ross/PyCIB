@@ -63,6 +63,18 @@ class TestScenarioDiagnostics:
         d = scenario_diagnostics(s, m)
         assert isinstance(d.total_impact_score, float)
 
+    def test_scenario_diagnostics_respects_tolerance_passthrough(self) -> None:
+        m = CIBMatrix({"A": ["a0", "a1"], "B": ["b0", "b1"]})
+        m.set_impact("A", "a0", "B", "b0", 1.0)
+        m.set_impact("A", "a0", "B", "b1", 1.0 + 5e-9)
+        s = Scenario({"A": "a0", "B": "b0"}, m)
+
+        strict = scenario_diagnostics(s, m, float_atol=0.0, float_rtol=0.0)
+        tolerant = scenario_diagnostics(s, m, float_atol=1e-8, float_rtol=0.0)
+
+        assert strict.is_consistent is False
+        assert tolerant.is_consistent is True
+
 
 class TestJudgmentSectionLabels:
     def test_labels_cover_full_section(self) -> None:

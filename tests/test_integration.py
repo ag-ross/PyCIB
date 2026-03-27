@@ -68,7 +68,7 @@ class TestPhase2Integration:
         assert len(robustness_scores) == len(candidates)
 
     def test_high_confidence_low_uncertainty(self) -> None:
-        """Test behavior with high confidence (low uncertainty)."""
+        """Test behaviour with high confidence (low uncertainty)."""
         desc = _toy_descriptors()
         impacts = _toy_impacts()
         matrix = UncertainCIBMatrix(desc, default_confidence=5)
@@ -96,7 +96,7 @@ class TestPhase2Integration:
         assert 0.0 <= prob <= 1.0
 
     def test_low_confidence_high_uncertainty(self) -> None:
-        """Test behavior with low confidence (high uncertainty)."""
+        """Test behaviour with low confidence (high uncertainty)."""
         desc = _toy_descriptors()
         impacts = _toy_impacts()
         matrix = UncertainCIBMatrix(desc, default_confidence=1)

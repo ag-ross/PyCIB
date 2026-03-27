@@ -23,3 +23,20 @@ def test_risk_bounds_match_frechet_bounds_for_pair_event_under_marginals_only() 
     assert abs(res.lower - lo) < 1e-8
     assert abs(res.upper - hi) < 1e-8
 
+
+def test_risk_bounds_rejects_unknown_event_outcome() -> None:
+    factors = [FactorSpec("A", ["a0", "a1"]), FactorSpec("B", ["b0", "b1"])]
+    marginals = {"A": {"a0": 0.6, "a1": 0.4}, "B": {"b0": 0.7, "b1": 0.3}}
+    try:
+        _ = event_probability_bounds(
+            factors=factors,
+            marginals=marginals,
+            multipliers={},
+            event={"A": "a2", "B": "b1"},
+            include_pairwise_targets=False,
+        )
+    except ValueError as exc:
+        assert "Unknown outcome" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for unknown event outcome")
+

@@ -1,3 +1,7 @@
+"""
+Unit tests for dynamic probabilistic predict-update behavior.
+"""
+
 import numpy as np
 
 from cib.prob.dynamic import DynamicProbabilisticCIA
@@ -20,6 +24,7 @@ def _multipliers_for_a_given_b(marginals, *, p_a1_b0: float, p_a1_b1: float):
 
 
 def test_predict_update_is_more_conservative_than_refit_when_kl_is_large() -> None:
+    """Predict-update should stay closer to prior than pure refit."""
     factors = [FactorSpec("A", ["a0", "a1"]), FactorSpec("B", ["b0", "b1"])]
     marginals = {"A": {"a0": 0.6, "a1": 0.4}, "B": {"b0": 0.7, "b1": 0.3}}
 
@@ -56,4 +61,22 @@ def test_predict_update_is_more_conservative_than_refit_when_kl_is_large() -> No
     d_refit = float(np.sum(np.abs(p2_refit - p1)))
     d_pu = float(np.sum(np.abs(p2_pu - p1)))
     assert d_pu < d_refit
+
+
+def test_predict_update_rejects_incompatible_factor_space() -> None:
+    """Predict-update should reject KL baselines from incompatible period spaces."""
+    factors_t1 = [FactorSpec("A", ["a0", "a1"]), FactorSpec("B", ["b0", "b1"])]
+    factors_t2 = [FactorSpec("B", ["b0", "b1"]), FactorSpec("A", ["a0", "a1"])]
+    marginals = {"A": {"a0": 0.6, "a1": 0.4}, "B": {"b0": 0.7, "b1": 0.3}}
+
+    model1 = ProbabilisticCIAModel(factors=factors_t1, marginals=marginals, multipliers={})
+    model2 = ProbabilisticCIAModel(factors=factors_t2, marginals=marginals, multipliers={})
+    dyn = DynamicProbabilisticCIA(periods=[2025, 2030], models_by_period={2025: model1, 2030: model2})
+
+    try:
+        _ = dyn.fit_distributions(mode="predict-update", method="direct", kl_weight=1.0)
+    except ValueError as exc:
+        assert "incompatible" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for incompatible predict-update factor space")
 

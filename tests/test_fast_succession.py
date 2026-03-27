@@ -97,3 +97,31 @@ def test_sparse_local_attractor_matches_reference_for_fixed_point() -> None:
         assert fast.is_cycle is False
         assert tuple(int(x) for x in ref.attractor.to_indices()) == fast.attractor  # type: ignore[union-attr]
 
+
+def test_fast_scorer_rejects_out_of_range_state_indices() -> None:
+    m = benchmark_matrix_b1()
+    scorer = FastCIBScorer.from_matrix(m)
+    bad = [0] * len(m.descriptors)
+    bad[0] = -1
+
+    try:
+        run_to_attractor_indices(scorer=scorer, initial_z_idx=bad, max_iterations=5)
+    except ValueError as exc:
+        assert "out of range" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for invalid index vector")
+
+
+def test_sparse_scorer_rejects_out_of_range_state_indices() -> None:
+    m = benchmark_matrix_b1()
+    scorer = SparseCIBScorer.from_matrix(m)
+    bad = [0] * len(m.descriptors)
+    bad[-1] = int(m.state_counts[-1]) + 1
+
+    try:
+        run_to_attractor_indices(scorer=scorer, initial_z_idx=bad, max_iterations=5)
+    except ValueError as exc:
+        assert "out of range" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for invalid index vector")
+

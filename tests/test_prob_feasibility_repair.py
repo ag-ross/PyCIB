@@ -1,3 +1,7 @@
+"""
+Unit tests for probabilistic feasibility strict/repair modes.
+"""
+
 import pytest
 
 from cib.prob.model import ProbabilisticCIAModel
@@ -5,6 +9,7 @@ from cib.prob.types import FactorSpec
 
 
 def test_strict_feasibility_rejects_frechet_violation() -> None:
+    """Strict mode should reject infeasible Fréchet targets."""
     factors = [FactorSpec("A", ["a0", "a1"]), FactorSpec("B", ["b0", "b1"])]
     marginals = {"A": {"a0": 0.5, "a1": 0.5}, "B": {"b0": 0.5, "b1": 0.5}}
 
@@ -21,6 +26,7 @@ def test_strict_feasibility_rejects_frechet_violation() -> None:
 
 
 def test_repair_feasibility_clips_targets_and_reports_adjustments() -> None:
+    """Repair mode should clip and report feasibility adjustments."""
     factors = [FactorSpec("A", ["a0", "a1"]), FactorSpec("B", ["b0", "b1"])]
     marginals = {"A": {"a0": 0.5, "a1": 0.5}, "B": {"b0": 0.5, "b1": 0.5}}
 

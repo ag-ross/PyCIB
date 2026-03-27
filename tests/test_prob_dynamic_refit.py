@@ -1,9 +1,14 @@
+"""
+Unit tests for dynamic probabilistic refit behavior.
+"""
+
 from cib.prob.dynamic import DynamicProbabilisticCIA
 from cib.prob.model import ProbabilisticCIAModel
 from cib.prob.types import FactorSpec
 
 
 def test_dynamic_refit_returns_distribution_per_period() -> None:
+    """Return one normalized distribution per configured period."""
     factors = [FactorSpec("A", ["a0", "a1"]), FactorSpec("B", ["b0", "b1"])]
 
     m1 = {"A": {"a0": 0.5, "a1": 0.5}, "B": {"b0": 0.6, "b1": 0.4}}

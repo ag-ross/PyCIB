@@ -1,5 +1,9 @@
 """
 Unit tests for dynamic (multi-period) CIB simulation.
+
+These tests validate DynamicCIB path simulation, cyclic descriptors, threshold
+rules, extended pathway modes (transient, regime, path_dependent), and related
+behaviour.
 """
 
 from __future__ import annotations
@@ -7,10 +11,10 @@ from __future__ import annotations
 import pytest
 
 from cib.constraints import ConstraintIndex, ForbiddenPair
-from cib.core import CIBMatrix, ConsistencyChecker
+from cib.core import CIBMatrix, ConsistencyChecker, Scenario
 from cib.cyclic import CyclicDescriptor
 from cib.dynamic import DynamicCIB
-from cib.succession import GlobalSuccession, LocalSuccession
+from cib.succession import GlobalSuccession, LocalSuccession, SuccessionOperator
 from cib.threshold import ThresholdRule
 from cib.example_data import (
     DATASET_B5_CONFIDENCE,
@@ -21,6 +25,9 @@ from cib.example_data import (
     dataset_b5_threshold_rule_fast_permitting,
 )
 from cib.uncertainty import UncertainCIBMatrix
+from cib.pathway import MemoryState
+from cib.regimes import RegimeSpec
+from cib.transition_kernel import DefaultTransitionKernel
 
 
 class TestDynamicCIB:
@@ -136,6 +143,84 @@ class TestDynamicCIB:
         dyn_all.add_threshold_rule(rule2)
         p_all = dyn_all.simulate_path(initial={"A": "High", "B": "Low"}, seed=123)
         assert p_all.scenarios[0].to_dict()["B"] == "Low"
+
+    def test_threshold_modifier_inplace_mutation_is_isolated_from_base_matrix(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("A", "Low", "B", "Low", 0.0)
+        m.set_impact("A", "Low", "B", "High", 0.0)
+        m.set_impact("A", "High", "B", "Low", 0.0)
+        m.set_impact("A", "High", "B", "High", 0.0)
+
+        def mutating_modifier(base: CIBMatrix) -> CIBMatrix:
+            base.set_impact("A", "High", "B", "Low", -3.0)
+            base.set_impact("A", "High", "B", "High", 3.0)
+            return base
+
+        dyn = DynamicCIB(m, periods=[1])
+        dyn.add_threshold_rule(
+            ThresholdRule(
+                name="MutatingThreshold",
+                condition=lambda s: s.get_state("A") == "High",
+                modifier=mutating_modifier,
+            )
+        )
+
+        _ = dyn.simulate_path(initial={"A": "High", "B": "Low"}, seed=123)
+        low_path = dyn.simulate_path(initial={"A": "Low", "B": "Low"}, seed=123)
+
+        assert low_path.scenarios[0].to_dict()["B"] == "Low"
+        assert m.get_impact("A", "High", "B", "Low") == pytest.approx(0.0)
+        assert m.get_impact("A", "High", "B", "High") == pytest.approx(0.0)
+
+    def test_threshold_modifier_inplace_mutation_ensemble_is_reproducible(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("A", "Low", "B", "Low", 0.0)
+        m.set_impact("A", "Low", "B", "High", 0.0)
+        m.set_impact("A", "High", "B", "Low", 0.0)
+        m.set_impact("A", "High", "B", "High", 0.0)
+
+        def mutating_modifier(base: CIBMatrix) -> CIBMatrix:
+            base.set_impact("A", "High", "B", "Low", -3.0)
+            base.set_impact("A", "High", "B", "High", 3.0)
+            return base
+
+        dyn = DynamicCIB(m, periods=[1, 2])
+        dyn.add_threshold_rule(
+            ThresholdRule(
+                name="MutatingThreshold",
+                condition=lambda s: s.get_state("A") == "High",
+                modifier=mutating_modifier,
+            )
+        )
+        paths1 = dyn.simulate_ensemble(
+            initial={"A": "Low", "B": "Low"},
+            n_runs=10,
+            base_seed=123,
+        )
+        paths2 = dyn.simulate_ensemble(
+            initial={"A": "Low", "B": "Low"},
+            n_runs=10,
+            base_seed=123,
+        )
+
+        assert [p.to_dicts() for p in paths1] == [p.to_dicts() for p in paths2]
+
+    def test_simulate_path_warns_when_threshold_rule_is_regime_only(self) -> None:
+        descriptors = {"A": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1])
+        dyn.add_threshold_rule(
+            ThresholdRule(
+                name="RegimeOnlyThreshold",
+                condition=lambda s: s.get_state("A") == "Low",
+                target_regime="baseline",
+            )
+        )
+
+        with pytest.warns(UserWarning, match="regime-transition threshold rules are ignored"):
+            _ = dyn.simulate_path(initial={"A": "Low"}, seed=123)
 
     def test_ensemble_reproducible(self) -> None:
         descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
@@ -257,6 +342,563 @@ class TestDynamicCIB:
                 structural_sigma=0.1,
                 structural_shock_scaling_mode="bad_mode",  # type: ignore[arg-type]
             )
+
+    def test_simulate_path_extended_transient_returns_disequilibrium_metrics(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("A", "Low", "B", "Low", 2.0)
+        m.set_impact("A", "Low", "B", "High", -2.0)
+        m.set_impact("A", "High", "B", "Low", -2.0)
+        m.set_impact("A", "High", "B", "High", 2.0)
+        m.set_impact("B", "Low", "A", "Low", 2.0)
+        m.set_impact("B", "Low", "A", "High", -2.0)
+        m.set_impact("B", "High", "A", "Low", -2.0)
+        m.set_impact("B", "High", "A", "High", 2.0)
+
+        dyn = DynamicCIB(m, periods=[1])
+        path = dyn.simulate_path_extended(
+            initial={"A": "Low", "B": "High"},
+            extension_mode="transient",
+        )
+
+        assert path.extension_mode == "transient"
+        assert len(path.disequilibrium_metrics) == 1
+        assert path.disequilibrium_metrics[0].is_consistent is False
+        assert path.disequilibrium_metrics[0].distance_to_consistent_set == 1.0
+        assert path.disequilibrium_metrics[0].distance_to_equilibrium == 0.0
+
+    def test_simulate_path_extended_regime_tracks_regime_history(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1, 2])
+        boosted = CIBMatrix(descriptors)
+        boosted.set_impacts(dict(m.iter_impacts()))
+        boosted.set_impact("A", "High", "B", "Low", -2.0)
+        boosted.set_impact("A", "High", "B", "High", 2.0)
+        dyn.add_regime(RegimeSpec(name="boosted", base_matrix=boosted))
+        dyn.set_regime_transition_rule(
+            lambda **kwargs: (
+                "boosted" if kwargs["realized_scenario"].get_state("A") == "High" else kwargs["current_regime"]
+            )
+        )
+
+        path = dyn.simulate_path_extended(
+            initial={"A": "High", "B": "Low"},
+            extension_mode="regime",
+            initial_regime="baseline",
+        )
+
+        assert len(path.active_regimes) == 2
+        assert path.active_regimes[0] in {"baseline", "boosted"}
+        assert len(path.active_matrices) == 2
+
+    def test_simulate_path_extended_regime_enforces_outputs_and_stable_provenance(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        boosted = CIBMatrix(descriptors)
+        boosted.set_impacts(dict(m.iter_impacts()))
+        boosted.set_impact("A", "High", "B", "Low", -2.0)
+        boosted.set_impact("A", "High", "B", "High", 2.0)
+
+        def modifier(base: CIBMatrix) -> CIBMatrix:
+            out = CIBMatrix(base.descriptors)
+            out.set_impacts(dict(base.iter_impacts()))
+            out.set_impact("A", "Low", "B", "Low", -1.0)
+            out.set_impact("A", "Low", "B", "High", 1.0)
+            return out
+
+        dyn = DynamicCIB(m, periods=[1])
+        dyn.add_regime(RegimeSpec(name="boosted", base_matrix=boosted))
+        dyn.set_regime_transition_rule(lambda **kwargs: "boosted")
+        dyn.add_threshold_rule(
+            ThresholdRule(
+                name="WithinRegimeModifier",
+                condition=lambda s: s.get_state("A") == "Low",
+                modifier=modifier,
+            )
+        )
+
+        path1 = dyn.simulate_path_extended(
+            initial={"A": "Low", "B": "Low"},
+            extension_mode="regime",
+            return_disequilibrium=False,
+            return_active_matrices=False,
+            return_transition_events=False,
+            return_regime_history=False,
+        )
+        path2 = dyn.simulate_path_extended(
+            initial={"A": "Low", "B": "Low"},
+            extension_mode="regime",
+        )
+
+        assert len(path1.disequilibrium_metrics) == 1
+        assert path1.active_regimes == ("boosted",)
+        assert len(path1.active_matrices) == 1
+        assert len(path1.transition_events) >= 2
+        assert path1.active_matrices[0].base_matrix_id == path2.active_matrices[0].base_matrix_id
+        assert path1.active_matrices[0].active_matrix_id == path2.active_matrices[0].active_matrix_id
+        assert path1.active_matrices[0].diff_summary["n_changed_cells"] > 0.0
+        assert "regime:boosted" in path1.active_matrices[0].provenance_labels
+        assert (
+            "threshold_modifier:WithinRegimeModifier"
+            in path1.active_matrices[0].provenance_labels
+        )
+        assert any(
+            event.event_type == "threshold_activation"
+            and event.metadata.get("activation_kind") == "modifier"
+            for event in path1.transition_events
+        )
+
+    def test_threshold_modifier_event_reports_object_identity_semantics(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+
+        def mutating_modifier(base: CIBMatrix) -> CIBMatrix:
+            base.set_impact("A", "Low", "B", "Low", -1.0)
+            base.set_impact("A", "Low", "B", "High", 1.0)
+            return base
+
+        dyn = DynamicCIB(m, periods=[1])
+        dyn.add_threshold_rule(
+            ThresholdRule(
+                name="MutatingThreshold",
+                condition=lambda s: s.get_state("A") == "Low",
+                modifier=mutating_modifier,
+            )
+        )
+
+        path = dyn.simulate_path_extended(
+            initial={"A": "Low", "B": "Low"},
+            extension_mode="regime",
+        )
+
+        modifier_events = [
+            event
+            for event in path.transition_events
+            if event.event_type == "threshold_activation"
+            and event.metadata.get("activation_kind") == "modifier"
+            and event.metadata.get("threshold_rule") == "MutatingThreshold"
+        ]
+        assert modifier_events
+        assert modifier_events[0].metadata.get(
+            "modifier_returned_distinct_object"
+        ) is False
+
+    def test_simulate_path_extended_threshold_can_trigger_regime_transition(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        baseline = CIBMatrix(descriptors)
+        boosted = CIBMatrix(descriptors)
+        boosted.set_impact("A", "High", "B", "Low", -2.0)
+        boosted.set_impact("A", "High", "B", "High", 2.0)
+
+        dyn = DynamicCIB(baseline, periods=[1])
+        dyn.add_regime(RegimeSpec(name="boosted", base_matrix=boosted))
+        dyn.add_threshold_rule(
+            ThresholdRule(
+                name="HighAEntersBoostedRegime",
+                condition=lambda s: s.get_state("A") == "High",
+                target_regime="boosted",
+            )
+        )
+
+        path = dyn.simulate_path_extended(
+            initial={"A": "High", "B": "Low"},
+            extension_mode="regime",
+            initial_regime="baseline",
+        )
+
+        assert path.active_regimes == ("boosted",)
+        assert "threshold_regime_transition:HighAEntersBoostedRegime" in (
+            path.active_matrices[0].provenance_labels
+        )
+        assert "threshold_modifier:HighAEntersBoostedRegime" not in (
+            path.active_matrices[0].provenance_labels
+        )
+        assert any(
+            event.event_type == "regime_transition"
+            and event.source == "threshold_rule"
+            and event.metadata.get("activation_kind") == "regime_transition"
+            and event.metadata.get("threshold_rule") == "HighAEntersBoostedRegime"
+            for event in path.transition_events
+        )
+
+    def test_simulate_path_extended_threshold_reaffirmation_does_not_log_regime_transition(
+        self,
+    ) -> None:
+        descriptors = {"A": ["Low", "High"]}
+        baseline = CIBMatrix(descriptors)
+
+        dyn = DynamicCIB(baseline, periods=[1, 2])
+        dyn.add_threshold_rule(
+            ThresholdRule(
+                name="StayBaseline",
+                condition=lambda s: s.get_state("A") == "Low",
+                target_regime="baseline",
+            )
+        )
+
+        path = dyn.simulate_path_extended(
+            initial={"A": "Low"},
+            extension_mode="regime",
+            initial_regime="baseline",
+        )
+
+        assert all(
+            "threshold_regime_transition:StayBaseline"
+            not in state.provenance_labels
+            for state in path.active_matrices
+        )
+        assert all(
+            "threshold_regime_reaffirmation:StayBaseline" in state.provenance_labels
+            for state in path.active_matrices
+        )
+        assert all(
+            event.event_type != "regime_transition"
+            for event in path.transition_events
+            if event.metadata.get("threshold_rule") == "StayBaseline"
+        )
+        assert any(
+            event.event_type == "threshold_activation"
+            and event.metadata.get("activation_kind") == "regime_reaffirmation"
+            and event.metadata.get("threshold_rule") == "StayBaseline"
+            for event in path.transition_events
+        )
+        assert path.active_matrices[0].entered_regime is True
+        assert path.active_matrices[1].entered_regime is False
+        assert path.active_matrices[0].regime_entry_period == 1
+        assert path.active_matrices[1].regime_entry_period == 1
+
+    def test_simulate_path_extended_reports_active_matrix_equilibrium(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("B", "Low", "A", "Low", 2.0)
+        m.set_impact("B", "Low", "A", "High", -2.0)
+        m.set_impact("B", "High", "A", "Low", 2.0)
+        m.set_impact("B", "High", "A", "High", -2.0)
+
+        dyn = DynamicCIB(m, periods=[1])
+        path = dyn.simulate_path_extended(
+            initial={"A": "Low", "B": "Low"},
+            extension_mode="transient",
+            dynamic_shocks_by_period={1: {("A", "High"): 10.0}},
+            equilibrium_mode="relax_unshocked",
+        )
+
+        assert path.equilibrium_scenarios is not None
+        realised = path.realised_scenarios[0]
+        equilibrium = path.equilibrium_scenarios[0]
+        assert realised.to_dict() != equilibrium.to_dict()
+        assert equilibrium.to_dict() == {"A": "Low", "B": "Low"}
+        assert path.scenarios_for_mode("equilibrium")[0] == equilibrium
+
+    def test_simulate_path_extended_allow_partial_records_converged(self) -> None:
+        """With allow_partial=True and a low cap, diagnostics record converged per period."""
+        descriptors = {"A": ["Low", "High"], "B": ["Weak", "Strong"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("A", "Low", "B", "Weak", 2.0)
+        m.set_impact("A", "Low", "B", "Strong", -2.0)
+        m.set_impact("A", "High", "B", "Weak", -2.0)
+        m.set_impact("A", "High", "B", "Strong", 2.0)
+        m.set_impact("B", "Weak", "A", "Low", 1.0)
+        m.set_impact("B", "Weak", "A", "High", -1.0)
+        m.set_impact("B", "Strong", "A", "Low", -1.0)
+        m.set_impact("B", "Strong", "A", "High", 1.0)
+
+        dyn = DynamicCIB(m, periods=[1, 2])
+        diag = {}
+        path = dyn.simulate_path_extended(
+            initial={"A": "Low", "B": "Strong"},
+            extension_mode="transient",
+            succession_operator=LocalSuccession(),
+            max_iterations=1,
+            allow_partial=True,
+            diagnostics=diag,
+        )
+        assert len(path.realised_scenarios) == 2
+        assert "converged" in diag
+        assert len(diag["converged"]) == 2
+        assert any(c is False for c in diag["converged"])
+
+    def test_simulate_path_extended_allow_partial_equilibrium_uses_higher_cap(self) -> None:
+        """With allow_partial and equilibrium requested, equilibrium is relaxed with separate cap."""
+        descriptors = {"A": ["Low", "High"], "B": ["Weak", "Strong"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("A", "Low", "B", "Weak", 2.0)
+        m.set_impact("A", "Low", "B", "Strong", -2.0)
+        m.set_impact("A", "High", "B", "Weak", -2.0)
+        m.set_impact("A", "High", "B", "Strong", 2.0)
+        m.set_impact("B", "Weak", "A", "Low", 1.0)
+        m.set_impact("B", "Weak", "A", "High", -1.0)
+        m.set_impact("B", "Strong", "A", "Low", -1.0)
+        m.set_impact("B", "Strong", "A", "High", 1.0)
+
+        dyn = DynamicCIB(m, periods=[1])
+        path = dyn.simulate_path_extended(
+            initial={"A": "Low", "B": "Strong"},
+            extension_mode="transient",
+            succession_operator=LocalSuccession(),
+            max_iterations=1,
+            allow_partial=True,
+            equilibrium_mode="relax_unshocked",
+            equilibrium_max_iterations=100,
+        )
+        assert path.equilibrium_scenarios is not None
+        assert len(path.equilibrium_scenarios) == 1
+        # Equilibrium run uses the higher cap and should converge to a consistent scenario.
+        eq = path.equilibrium_scenarios[0]
+        assert ConsistencyChecker.check_consistency(eq, m) is True
+
+    def test_simulate_path_extended_path_dependent_tracks_memory_and_consistency(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1, 2])
+        path = dyn.simulate_path_extended(
+            initial={"A": "Low", "B": "Low"},
+            extension_mode="path_dependent",
+            memory_state=MemoryState(
+                period=0,
+                values={"required_regime": "baseline"},
+                flags={},
+                export_label="memory",
+            ),
+            transition_kernel=DefaultTransitionKernel(),
+        )
+
+        assert len(path.memory_states) == 2
+        assert len(path.structural_consistency) == 2
+        assert path.structural_consistency[0].is_structurally_consistent is True
+
+    def test_simulate_path_extended_path_dependent_memory_changes_realized_transition(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("B", "Low", "A", "Low", 2.0)
+        m.set_impact("B", "Low", "A", "High", -2.0)
+        m.set_impact("B", "High", "A", "Low", 2.0)
+        m.set_impact("B", "High", "A", "High", -2.0)
+
+        dyn = DynamicCIB(m, periods=[1])
+        path = dyn.simulate_path_extended(
+            initial={"A": "Low", "B": "Low"},
+            extension_mode="path_dependent",
+            memory_state=MemoryState(
+                period=0,
+                values={"locked_descriptors": {"B": "High"}},
+                flags={"locked_in": True},
+                export_label="memory",
+            ),
+            transition_kernel=DefaultTransitionKernel(),
+        )
+
+        assert path.realised_scenarios[0].to_dict()["B"] == "High"
+        assert any(
+            event.event_type == "irreversible_transition"
+            for event in path.transition_events
+        )
+        assert path.structural_consistency[0].is_structurally_consistent is True
+
+    def test_simulate_path_extended_path_dependent_does_not_log_plain_kernel_metadata_as_memory_update(
+        self,
+    ) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1])
+
+        path = dyn.simulate_path_extended(
+            initial={"A": "Low", "B": "Low"},
+            extension_mode="path_dependent",
+            transition_kernel=DefaultTransitionKernel(),
+        )
+
+        assert path.transition_events == ()
+
+    def test_simulate_path_extended_path_dependent_logs_memory_update_when_kernel_changes_memory(
+        self,
+    ) -> None:
+        descriptors = {"A": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1])
+
+        path = dyn.simulate_path_extended(
+            initial={"A": "Low"},
+            extension_mode="path_dependent",
+            transition_kernel=lambda **kwargs: (
+                kwargs["current_scenario"],
+                MemoryState(
+                    period=0,
+                    values={"phase": 1},
+                    flags={},
+                    export_label="memory",
+                ),
+                {"used_history": False},
+            ),
+        )
+
+        assert any(
+            event.event_type == "memory_update"
+            for event in path.transition_events
+        )
+
+    def test_simulate_path_extended_does_not_alias_caller_memory_state(self) -> None:
+        descriptors = {"A": ["Low", "High"]}
+        matrix = CIBMatrix(descriptors)
+        dyn = DynamicCIB(matrix, periods=[1])
+        initial_memory = MemoryState(
+            period=0,
+            values={"phase": {"value": 0}},
+            flags={},
+            export_label="memory",
+        )
+
+        def mutating_kernel(**kwargs):
+            memory_state = kwargs["memory_state"]
+            if memory_state is not None:
+                memory_state.values["phase"]["value"] = 99
+            return kwargs["current_scenario"], memory_state, {}
+
+        _ = dyn.simulate_path_extended(
+            initial={"A": "Low"},
+            extension_mode="path_dependent",
+            memory_state=initial_memory,
+            transition_kernel=mutating_kernel,
+        )
+
+        assert initial_memory.values["phase"]["value"] == 0
+
+    def test_simulate_path_extended_initial_output_keeps_period_zero_state_coherent(
+        self,
+    ) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[2025, 2030])
+
+        path = dyn.simulate_path_extended(
+            initial={"A": "Low", "B": "Low"},
+            extension_mode="path_dependent",
+            first_period_output_mode="initial",
+            memory_state=MemoryState(
+                period=0,
+                values={"required_regime": "baseline"},
+                flags={},
+                export_label="memory",
+            ),
+            transition_kernel=DefaultTransitionKernel(),
+        )
+
+        assert path.realised_scenarios[0].to_dict() == {"A": "Low", "B": "Low"}
+        assert path.memory_states[0].values == {"required_regime": "baseline"}
+        assert path.memory_states[0].period == 2025
+        assert path.structural_consistency[0].is_structurally_consistent is True
+
+    def test_first_period_initial_output_keeps_internal_history_for_path_callbacks(
+        self,
+    ) -> None:
+        descriptors = {"A": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1, 2])
+        call_count = {"n": 0}
+
+        def kernel(**kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return Scenario({"A": "High"}, m), kwargs["memory_state"], {}
+            previous_path = kwargs["previous_path"]
+            if not previous_path:
+                raise ValueError("missing previous path for second period")
+            if previous_path[-1].to_dict()["A"] != "High":
+                raise ValueError("internal previous path did not preserve realised attractor")
+            return kwargs["current_scenario"], kwargs["memory_state"], {}
+
+        path = dyn.simulate_path_extended(
+            initial={"A": "Low"},
+            extension_mode="path_dependent",
+            first_period_output_mode="initial",
+            transition_kernel=kernel,
+        )
+
+        assert path.realised_scenarios[0].to_dict()["A"] == "Low"
+        assert path.realised_scenarios[1].to_dict()["A"] == "High"
+
+    def test_simulate_path_extended_metrics_use_locked_period_operator(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("A", "Low", "B", "Low", 2.0)
+        m.set_impact("A", "Low", "B", "High", -2.0)
+        m.set_impact("A", "High", "B", "Low", -2.0)
+        m.set_impact("A", "High", "B", "High", 2.0)
+
+        dyn = DynamicCIB(m, periods=[1, 2])
+        dyn.add_cyclic_descriptor(
+            CyclicDescriptor(
+                name="B",
+                transition={
+                    "Low": {"Low": 0.0, "High": 1.0},
+                    "High": {"Low": 0.0, "High": 1.0},
+                },
+            )
+        )
+
+        path = dyn.simulate_path_extended(
+            initial={"A": "Low", "B": "Low"},
+            extension_mode="transient",
+            seed=123,
+        )
+
+        assert path.realised_scenarios[1].to_dict() == {"A": "Low", "B": "High"}
+        assert path.disequilibrium_metrics[1].is_consistent is False
+        assert path.disequilibrium_metrics[1].time_to_equilibrium is None
+
+    def test_simulate_path_extended_equilibrium_respects_constraints_and_locks(self) -> None:
+        descriptors = {"Cycle": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        for cycle_state in descriptors["Cycle"]:
+            m.set_impact("Cycle", cycle_state, "B", "Low", 0.0)
+            m.set_impact("Cycle", cycle_state, "B", "High", 1.0)
+
+        dyn = DynamicCIB(m, periods=[1, 2])
+        dyn.add_cyclic_descriptor(
+            CyclicDescriptor(
+                name="Cycle",
+                transition={
+                    "Low": {"High": 1.0},
+                    "High": {"High": 1.0},
+                },
+            )
+        )
+        constraints = [ForbiddenPair("Cycle", "High", "B", "High")]
+
+        path = dyn.simulate_path_extended(
+            initial={"Cycle": "Low", "B": "Low"},
+            extension_mode="transient",
+            constraints=constraints,
+            constraint_mode="repair",
+            constrained_top_k=2,
+            constrained_backtracking_depth=2,
+            equilibrium_mode="relax_unshocked",
+        )
+
+        assert path.equilibrium_scenarios is not None
+        eq_states = [s.to_dict() for s in path.equilibrium_scenarios]
+        assert eq_states == [
+            {"Cycle": "Low", "B": "High"},
+            {"Cycle": "High", "B": "Low"},
+        ]
+
+    def test_trace_to_equilibrium_stops_on_first_consistent_state(self) -> None:
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("B", "Low", "A", "Low", 2.0)
+        m.set_impact("B", "Low", "A", "High", -2.0)
+        m.set_impact("B", "High", "A", "Low", 2.0)
+        m.set_impact("B", "High", "A", "High", -2.0)
+
+        dyn = DynamicCIB(m, periods=[1])
+        path = dyn.trace_to_equilibrium(initial={"A": "High", "B": "High"})
+
+        assert path.disequilibrium_metrics[0].time_to_equilibrium == 1
+        assert path.disequilibrium_metrics[0].entered_consistent_set is False
+        assert path.disequilibrium_metrics[-1].is_consistent is True
+        assert path.disequilibrium_metrics[-1].time_to_equilibrium == 0
+        assert path.disequilibrium_metrics[-1].entered_consistent_set is True
 
         with pytest.raises(
             ValueError, match="structural_shock_scaling_alpha must be non-negative"
@@ -488,36 +1130,125 @@ class TestDynamicCIB:
                 succession_operator=DerivedGlobalSuccession(),
             )
 
-    def test_dynamic_shocks_reject_non_global_succession_in_simulate_path(self) -> None:
+    def test_dynamic_shocks_reject_custom_succession_in_simulate_path(self) -> None:
+        """Custom operators (not GlobalSuccession or LocalSuccession) are rejected with dynamic shocks."""
+
+        class CustomSuccession(SuccessionOperator):
+            def find_successor(self, scenario, matrix):
+                return scenario
+
         descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
         m = CIBMatrix(descriptors)
         dyn = DynamicCIB(m, periods=[1])
         dynamic_shocks = {1: {("A", "High"): 1.0}}
         with pytest.raises(
             ValueError,
-            match="dynamic_shocks_by_period currently supports only the built-in GlobalSuccession operator",
+            match="GlobalSuccession or LocalSuccession operator",
         ):
             dyn.simulate_path(
                 initial={"A": "Low", "B": "Low"},
                 dynamic_shocks_by_period=dynamic_shocks,
-                succession_operator=LocalSuccession(),
+                succession_operator=CustomSuccession(),
             )
 
-    def test_dynamic_tau_rejects_non_global_succession_in_simulate_ensemble(self) -> None:
+    def test_dynamic_shocks_accept_local_succession_in_simulate_path(self) -> None:
+        """simulate_path with dynamic_shocks_by_period accepts LocalSuccession."""
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        dyn = DynamicCIB(m, periods=[1])
+        dynamic_shocks = {1: {("A", "High"): 1.0}}
+        path = dyn.simulate_path(
+            initial={"A": "Low", "B": "Low"},
+            dynamic_shocks_by_period=dynamic_shocks,
+            succession_operator=LocalSuccession(),
+            max_iterations=50,
+        )
+        assert len(path.scenarios) >= 1
+        assert path.scenarios[0].to_dict()["A"] in ("Low", "High")
+        assert path.scenarios[0].to_dict()["B"] in ("Low", "High")
+
+    def test_simulate_path_extended_with_dynamic_shocks_and_local_succession(
+        self,
+    ) -> None:
+        """simulate_path_extended with dynamic_shocks_by_period and LocalSuccession runs."""
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("A", "Low", "B", "Low", 2.0)
+        m.set_impact("A", "Low", "B", "High", -2.0)
+        m.set_impact("A", "High", "B", "Low", -2.0)
+        m.set_impact("A", "High", "B", "High", 2.0)
+        m.set_impact("B", "Low", "A", "Low", 1.0)
+        m.set_impact("B", "Low", "A", "High", -1.0)
+        m.set_impact("B", "High", "A", "Low", -1.0)
+        m.set_impact("B", "High", "A", "High", 1.0)
+        dyn = DynamicCIB(m, periods=[1, 2])
+        dynamic_shocks = {1: {("A", "High"): 0.5}, 2: {("B", "High"): 0.5}}
+        pathway = dyn.simulate_path_extended(
+            initial={"A": "Low", "B": "Low"},
+            extension_mode="transient",
+            first_period_output_mode="initial",
+            dynamic_shocks_by_period=dynamic_shocks,
+            succession_operator=LocalSuccession(),
+            max_iterations=50,
+            seed=42,
+        )
+        assert pathway.periods is not None
+        assert len(pathway.periods) == 2
+        scenarios = pathway.scenarios_for_mode("realized")
+        assert len(scenarios) == 2
+        for s in scenarios:
+            assert s.to_dict()["A"] in ("Low", "High")
+            assert s.to_dict()["B"] in ("Low", "High")
+
+    def test_dynamic_tau_rejects_custom_succession_in_simulate_ensemble(self) -> None:
+        """Custom operators are rejected when dynamic_tau is used."""
+
+        class CustomSuccession(SuccessionOperator):
+            def find_successor(self, scenario, matrix):
+                return scenario
+
         descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
         m = CIBMatrix(descriptors)
         dyn = DynamicCIB(m, periods=[1, 2])
         with pytest.raises(
             ValueError,
-            match="dynamic_tau currently supports only the built-in GlobalSuccession operator",
+            match="GlobalSuccession or LocalSuccession operator",
         ):
             dyn.simulate_ensemble(
                 initial={"A": "Low", "B": "Low"},
                 n_runs=2,
                 base_seed=123,
                 dynamic_tau=0.2,
-                succession_operator=LocalSuccession(),
+                succession_operator=CustomSuccession(),
             )
+
+    def test_dynamic_tau_accepts_local_succession_in_simulate_ensemble(self) -> None:
+        """simulate_ensemble with dynamic_tau accepts LocalSuccession."""
+        descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
+        m = CIBMatrix(descriptors)
+        m.set_impact("A", "Low", "B", "Low", 2.0)
+        m.set_impact("A", "Low", "B", "High", -2.0)
+        m.set_impact("A", "High", "B", "Low", -2.0)
+        m.set_impact("A", "High", "B", "High", 2.0)
+        m.set_impact("B", "Low", "A", "Low", 1.0)
+        m.set_impact("B", "Low", "A", "High", -1.0)
+        m.set_impact("B", "High", "A", "Low", -1.0)
+        m.set_impact("B", "High", "A", "High", 1.0)
+        dyn = DynamicCIB(m, periods=[1, 2])
+        pathways = dyn.simulate_ensemble(
+            initial={"A": "Low", "B": "Low"},
+            n_runs=2,
+            base_seed=123,
+            dynamic_tau=0.1,
+            succession_operator=LocalSuccession(),
+            max_iterations=50,
+        )
+        assert len(pathways) == 2
+        for pathway in pathways:
+            assert pathway.periods is not None
+            assert len(pathway.periods) >= 1
+            scenarios = pathway.scenarios_for_mode("realized")
+            assert len(scenarios) >= 1
 
     def test_dynamic_constraints_repair_returns_only_feasible_scenarios(self) -> None:
         descriptors = {"Cycle": ["Low", "High"], "B": ["Low", "High"]}

@@ -1,7 +1,15 @@
+"""
+Unit tests for scenario attribution and flip-candidate utilities.
+
+These tests validate attribute_scenario and flip_candidates_for_descriptor
+for margin and contribution behaviour.
+"""
+
 from __future__ import annotations
 
 from cib.attribution import attribute_scenario, flip_candidates_for_descriptor
 from cib.core import CIBMatrix, Scenario
+from cib.scoring import descriptor_disequilibrium_contributions
 
 
 def _simple_matrix() -> CIBMatrix:
@@ -48,4 +56,14 @@ def test_flip_candidates_include_feasible_cell_change() -> None:
     flips = flip_candidates_for_descriptor(aA, k=10)
     assert len(flips) > 0
     assert any(f.feasible_under_clip for f in flips)
+
+
+def test_descriptor_disequilibrium_contributions_wrap_attribution() -> None:
+    m = _simple_matrix()
+    s = Scenario({"A": "Low", "B": "High"}, m)
+
+    contributions = descriptor_disequilibrium_contributions(s, m)
+
+    assert contributions["A"]["alternative_state"] == "High"
+    assert "B" in contributions["A"]["source_deltas"]
 

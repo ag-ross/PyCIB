@@ -1,9 +1,11 @@
 """
 Unit tests for validation examples.
 
-These tests use small synthetic fixtures to validate behavior without relying on
+These tests use small synthetic fixtures to validate behaviour without relying on
 bundled example datasets (the repository keeps a single canonical 5-state demo).
 """
+
+import pytest
 
 from cib.analysis import ScenarioAnalyzer
 from cib.core import CIBMatrix, ConsistencyChecker, Scenario
@@ -39,6 +41,14 @@ def _toy_impacts() -> dict[tuple[str, str, str, str], float]:
 
 class TestSyntheticExamples:
     """Validation tests using synthetic fixtures."""
+
+    def test_enumerate_scenarios_default_cap_raises_without_materializing(self) -> None:
+        """Scenario space above the default cap must not be enumerated implicitly."""
+        desc = {f"D{i}": ["L", "H"] for i in range(16)}
+        matrix = CIBMatrix(desc)
+        analyzer = ScenarioAnalyzer(matrix)
+        with pytest.raises(ValueError, match="allow_unbounded"):
+            analyzer.enumerate_scenarios()
 
     def test_find_consistent_scenarios(self) -> None:
         """Find at least one consistent scenario."""
