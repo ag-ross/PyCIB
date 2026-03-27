@@ -100,6 +100,13 @@ Relevant technical reference is provided in the section “Scaling workflows (so
   - diagnostics of convergence and run completion.
 - **Example (workshop framing)**: the five-descriptor example may yield several attractors; Monte Carlo analysis may be used to estimate which attractors are common and which are rare under the assumed sampling design.
 
+Interpretation and default-quality note:
+
+- `MonteCarloAttractorResult.weights` are normalised over completed runs (`counts / n_completed`), so frequencies are conditional on non-timeout runs.
+- Diagnostics expose completion quality and both denominator views (`n_timeouts`, `n_completed_runs`, `completion_fraction`, and requested-run-normalised frequencies).
+- A robust completion threshold is enabled by default (`min_completion_fraction=0.995`); this can be tightened, relaxed, or disabled (`None`) depending on use case.
+- In practice, strict profiles are recommended for reporting/publication, while exploratory runs can use permissive settings when timeout diagnostics are reviewed explicitly.
+
 Worked reference workflows are provided in `examples/example_solver_modes.py` and `examples/example_solver_modes_c10.py`.
 Relevant technical reference is provided in the section “Scaling workflows (solver modes and benchmarks)” below.
 
@@ -119,6 +126,89 @@ Relevant technical reference is provided in the section “Scaling workflows (so
 
 Worked reference workflows are provided in `examples/example_dynamic_cib_c10.py`, `examples/example_dynamic_cib_c15_rare_events.py`, and `examples/dynamic_cib.ipynb`.
 Relevant technical reference is provided in the section “Simulation-first probabilistic CIB (stochastic simulation workflow)” below.
+
+#### 4.4A Disequilibrium extensions (transient inconsistency, regimes, and path dependence)
+
+The dynamic layer provides the disequilibrium-aware entrypoint
+`DynamicCIB.simulate_path_extended(...)`.
+
+This entrypoint is intended for cases where realised pathway behaviour is not to
+be described solely by one timeless equilibrium notion. Three extension modes
+are provided:
+
+- **Transient inconsistency (`extension_mode="transient"`)**: inconsistent realised states are treated as valid analytical objects and are returned with per-period disequilibrium metrics such as consistency margins, brink descriptors, distance to the consistent set, separate attractor proximity, and time to first entry into the consistent set.
+- **Regime-aware moving equilibrium (`extension_mode="regime"`)**: each period is associated with a named active regime and an explicit active-matrix provenance record. Realised scenarios and optional equilibrium scenarios are interpreted relative to the active period matrix.
+- **Path-dependent endogenous dynamics (`extension_mode="path_dependent"`)**: realised transitions may depend on explicit memory state, adaptive matrix updates, and structural-consistency checks in addition to local CIB balance.
+
+The extended output object is `ExtendedTransformationPathway`. It stores:
+
+- realised scenarios,
+- optional equilibrium scenarios,
+- per-period disequilibrium metrics,
+- active regimes,
+- active matrices,
+- transition events,
+- optional memory states,
+- and optional structural-consistency diagnostics.
+
+Worked reference workflows are provided in:
+
+- `examples/example_disequilibrium_transient.py`
+- `examples/example_disequilibrium_regime.py`
+- `examples/example_disequilibrium_path_dependent.py`
+
+#### 4.4B Realised, equilibrium, and structurally consistent outputs
+
+The following distinction is to be maintained in reporting:
+
+- **Realised output**: the actual scenario returned by the configured dynamic run.
+- **Equilibrium output**: the local CIB-consistent relaxation under the active matrix when equilibrium reporting is requested.
+- **Structural consistency output**: a separate diagnostic of whether regime, memory state, lock-in flags, and other path-dependent state remain coherent with the realised path history.
+
+Local equilibrium and structural consistency are not interchangeable diagnostics.
+The former refers to impact-balance consistency under the active matrix; the
+latter refers to the coherence of the broader dynamic state. In particular,
+structural consistency checks use realised path history to distinguish a
+persisting lock from a newly binding lock, and to verify that any reported
+cycle phase is continuous with the immediately preceding realised scenario.
+
+For `simulate_path_extended(...)`, equilibrium reporting remains local to the
+active matrix of each period. In other words, realised and equilibrium outputs
+must be compared within the same period-specific regime/provenance context, not
+against a timeless baseline CIM.
+
+`ActiveMatrixState.provenance_labels` is intended to make this explicit:
+
+- labels of the form `regime:<name>` identify the named regime supplying the
+  period matrix;
+- labels of the form `threshold_regime_transition:<rule>` identify threshold
+  rules that changed the active regime for the period;
+- labels of the form `threshold_regime_reaffirmation:<rule>` identify threshold
+  rules that re-validated the already-active regime without changing it;
+- labels of the form `threshold_modifier:<rule>` identify in-regime temporary
+  modifiers rather than regime changes;
+- `TransitionEvent(event_type="regime_transition")` records an actual regime
+  switch, while `threshold_activation` records a temporary within-regime
+  activation or a same-regime reaffirmation;
+- structural shocks, judgment sampling, and adaptive updates are likewise kept
+  separate in both event logs and matrix provenance.
+
+`ThresholdRule` may therefore be used in two distinct ways:
+
+- as a temporary in-regime matrix modifier (`modifier=...`);
+- or as a threshold-triggered regime switch (`target_regime="..."`).
+
+These two uses are not interchangeable in outputs: the former is reported as
+`threshold_activation`, while the latter is reported as `regime_transition`
+with `source="threshold_rule"`.
+
+Threshold modifiers are applied with defensive copy-on-write semantics: the
+modifier callable receives a clone of the current active matrix. This prevents
+in-place callback mutations from leaking into shared baseline matrix state
+across periods or runs. For modifier activations, transition-event metadata
+includes `modifier_returned_distinct_object` so downstream diagnostics can
+distinguish callbacks that returned a new object from callbacks that mutated
+and returned the provided clone.
 
 #### 4.5 Branching pathway summaries (compact pathway maps)
 
@@ -370,6 +460,14 @@ For large scenario spaces, explicit enumeration is not required. An approximate 
 
 The approximation back-end is implemented as a sampled-support representation (`cib.prob.ApproxJointDistribution`) produced by a stochastic fitting procedure.
 The returned distribution is approximate and does not provide exact scenario probabilities for arbitrary assignments unless they are present in the sampled support.
+RNG semantics follow standard stochastic API conventions for both iterative and
+direct fitting:
+
+- `random_seed=None` uses fresh non-deterministic initialisation.
+- an explicit integer seed preserves reproducible fits.
+
+For direct fitting specifically, this applies to both non-KL and KL-regularised
+setups because initialisation tie-breaking is now seed-driven in both paths.
 
 ### Dynamic modelling
 
@@ -494,7 +592,7 @@ Threshold rule timing:
 
 ### 6) What a “Monte Carlo run” is (and why it is a single path)
 
-A single Monte Carlo run produces one realised pathway \(z_{t_0}, z_{t_1}, \dots\) because one draw of the stochastic elements (judgement sampling, shocks, cyclic transitions) is made and then the pathway is advanced forward in time. The branching behaviour is not within a single run; it emerges across many runs. The distributional plots (probability bands, fan charts) are summaries of the ensemble.
+A single Monte Carlo run produces one realised pathway \(z_{t_0}, z_{t_1}, \dots\) because one draw of the stochastic elements (judgement sampling, shocks, cyclic transitions) is made and then the pathway is advanced forward in time. The branching behaviour is not within a single run; it emerges across many runs. The distributional plots (ensemble-share bands, fan charts) are summaries of the ensemble.
 
 ### 7) Branching pathway graphs versus Monte Carlo ensembles
 
@@ -531,6 +629,11 @@ Implementation notes:
 - The network analysis layer is implemented in `cib/network_analysis.py`.
 - Community detection uses Louvain clustering via `networkx.community.louvain_communities()`, which requires NetworkX 3.0 or newer.
 - The example notebook generates a final-period scenario similarity plot and writes a text file with the plotted scenario definitions and their Monte Carlo counts.
+- Pathway enumeration APIs support bounded execution via `max_paths` and `time_limit_s`.
+  `max_paths` caps returned pathways (top-ranked by strength), while
+  `time_limit_s` bounds enumeration time.
+  When `return_metadata=True`, results include completeness/truncation metadata
+  (`is_complete`, truncation reason, and enumeration counts).
 
 ### 9) How median trajectories arise (and why they can appear constant)
 
@@ -586,7 +689,19 @@ When dynamic shocks or judgement uncertainty are present:
 
 #### Cycle detection in branching pathways
 
-In `BranchingPathwayBuilder`, cycles are handled by selecting the first scenario in the cycle as the representative node. This prevents infinite loops while preserving the cycle information in the succession path.
+In `BranchingPathwayBuilder`, cycles are handled by selecting the first scenario in the cycle as the representative node. This prevents infinite loops while preserving the cycle information in the succession path. When regime or memory state affects the transition law, the builder uses an explicit sampled approximation contract and node identity includes scenario, regime residence, memory state, and retained realised-history signature rather than scenario-only.
+
+The approximation contract is surfaced directly on `BranchingResult.approximation_contract`.
+When memory-aware branching is active, `memory_states_by_period` must be read
+alongside `scenarios_by_period`, `active_regimes`, `regime_states_by_period`,
+and `history_signatures_by_period`; scenario-only identity is not sufficient to
+interpret the branch graph. `BranchRegimeState` records whether the current
+period is a fresh regime entry, the regime-entry period, the regime-spell index,
+and any threshold-driven reaffirmations. `branching_regime_residence_timelines(...)`
+aggregates these regime-residence semantics across the branch graph. By default
+the retained history horizon is the full realised branch prefix, but
+`history_horizon` may be set to retain only the most recent `n` realised
+scenarios when a shorter path-dependence contract is desired.
 
 #### Practical implications
 
@@ -787,7 +902,20 @@ Notes:
 - For dynamic shocks, a single AR(1) shock field \(\eta\) is sampled at the (descriptor, candidate_state) level using the same generator as the dynamic simulation layer. A single pseudo-period is used because the transformation-matrix test is a static (one-step) perturbation experiment rather than a multi-period time series.
 - If succession yields a cycle, the transformation condition is evaluated against all states in the cycle (not only a representative element).
 
-The `TransformationMatrixBuilder` class builds transformation matrices by testing perturbations across scenario pairs.
+Transformation matrices are built by the `TransformationMatrixBuilder` class by
+testing perturbations across scenario pairs. For Capability 3 workflows, this
+is extended from descriptive path summaries to period-resolved perturbation
+analysis by `analyze_path_to_path_transformations(...)`, under each period's
+active matrix, active regime, and optional memory context, so that a changed
+path can be assessed for whether its changed periods are transformation-supported.
+
+Important attribution rule:
+
+- if a changed period is a memory-only divergence (scenario state unchanged,
+  memory changed), perturbation testing is skipped for that period and
+  perturbation support is reported as false.
+- memory-change detection includes `MemoryState.period` as well as
+  `values`/`flags`/`export_label`.
 
 ### Expert aggregation (weighted)
 
@@ -813,14 +941,33 @@ Two scaling-oriented solver entrypoints are exposed on `ScenarioAnalyzer`:
 - `ScenarioAnalyzer.find_attractors_monte_carlo(...)`:
   - An approximate method, where initial scenarios are sampled and succession is run to a fixed point or a cycle.
   - Estimated attractor weights are returned as Monte Carlo frequencies.
+  - The primary `weights` field is completed-run normalised; requested-run-normalised frequencies are available in diagnostics for explicit conditioning checks.
+  - Robust completion gating is configurable via `min_completion_fraction` and `fail_on_timeout` in `MonteCarloAttractorConfig`.
 - `ScenarioAnalyzer.find_all_consistent_exact(...)`:
   - An exact method, where a depth-first partial-assignment search is performed with an optional sound pruning bound.
   - The complete consistent-scenario set is returned when the search completes.
+
+`ScenarioAnalyzer.find_all_consistent(...)` has explicit contract modes:
+
+- `mode="exhaustive"` (default): exhaustive enumeration is required; infeasible requests raise `ValueError`.
+- `mode="shortlist"`: random-restart shortlist is explicitly requested.
+- `mode="auto"`: legacy auto-switch behavior is used (warning-backed).
+
+When `return_metadata=True`, `FindAllConsistentResult` exposes deterministic
+completeness semantics (`is_complete`), requested/effective modes, switch
+reason, and threshold/cap context for downstream reporting.
 
 Configuration dataclasses are defined in `cib.solvers.config` (`MonteCarloAttractorConfig`, `ExactSolverConfig`).
 
 An optional sparse scoring backend may be selected for Monte Carlo succession workflows by setting `MonteCarloAttractorConfig(fast_backend="sparse")`.
 This backend is provided in `cib.sparse_scoring` and is intended for cases where the impact structure is sparse and memory pressure from dense tensors is not desired.
+
+Fast scoring memory-policy note:
+
+- `FastCIBScorer.from_matrix(...)` supports `max_workspace_bytes` preflight checks.
+- Solver paths pass explicit workspace policies (for example, exact solver `max_delta_array_bytes`, Monte Carlo `max_fast_scorer_workspace_bytes`).
+- Non-strict fast-path fallback activation is warning-backed and diagnostics include standardized fallback metadata (`fallback_stage`, `fallback_from`, fallback target, and exception details).
+- Convenience fast checks in `ConsistencyChecker.check_consistency(..., use_fast=True)` also use a documented default workspace cap, with keyword override and explicit `None` opt-out.
 
 An exact enumeration sparse rewrite is not provided. If exact enumeration is required at sizes where dense `delta_max` precomputation is the limiting factor, the exact solver would need to be rewritten with a different pruning bound that is compatible with sparse structures.
 
@@ -895,7 +1042,11 @@ When examples are run or the package is imported, several output files are gener
 
 Both approaches are probabilistic and can use the same uncertainty and shock settings. The difference is the output representation:
 
-- **Monte Carlo ensemble (individual-path plots, probability bands, fan chart)**:
+Terminology note:
+- **Ensemble share** is used for empirical run frequencies from simulation-first Monte Carlo ensembles.
+- **Probability** is used for explicit probabilistic model outputs (`cib.prob`) or dedicated probability estimators (for example, `P(consistent)`).
+
+- **Monte Carlo ensemble (individual-path plots, ensemble-share bands, fan chart)**:
   - Many full trajectories \(z_{2025}, z_{2030}, \dots\) are run and summarised.
   - Best when time-series uncertainty (state probabilities, quantiles, expected value) is desired and when the state space is too large to map explicitly.
   - A distribution over outcomes is produced without explicitly constructing a scenario graph.
@@ -917,7 +1068,7 @@ The number of Monte Carlo runs required depends on the method, the system size, 
 
 **Monte Carlo ensemble (full pathway simulation):**
 - **Rapid overview and testing:** \(M = 200\)–\(250\) runs can be acceptable if Monte Carlo error bars are reported. Approximate trends are provided and major pathways are identified.
-- **Stable bands for reporting:** \(M \ge 2{,}000\) runs are preferred (and increased further for larger \(N\), more states, or many periods). Sampling noise in probability bands and quantile estimates is reduced, especially for rare events and tail probabilities.
+- **Stable bands for reporting:** \(M \ge 2{,}000\) runs are preferred (and increased further for larger \(N\), more states, or many periods). Sampling noise in ensemble-share bands and quantile estimates is reduced, especially for rare events and tail probabilities.
 - **Computational trade-off:** a complete trajectory across all periods is simulated by each run, so total cost scales linearly with \(M\) and the number of periods.
 
 **Hybrid branching (transition sampling):**
@@ -1029,3 +1180,94 @@ plt.show()
 - Node size: node size is proportional to scenario frequency when node weights are provided. This is a distribution visualisation; there is no well-defined mean scenario for categorical state vectors.
 - What edges represent: similarity between scenarios is represented by edges, not time evolution. With `edge_metric="hamming"`, scenarios are connected when they differ in a small number of descriptor-state choices, and edge weights reflect that distance.
 - Why isolated nodes occur: a node can be isolated if no sufficiently similar neighbours exist within the plotted subset, or if connections are pruned by edge limits for readability.
+
+## JSON import/export format
+
+JSON import/export helpers (`save_to_json`, `load_from_json`) use a lossless
+impact schema in `format_version=2`.
+
+- `descriptors` remains a mapping from descriptor names to ordered state labels.
+- `impacts` is a list of records with explicit fields:
+  `src_desc`, `src_state`, `tgt_desc`, `tgt_state`, `impact`.
+- This avoids delimiter-based key encoding and preserves labels containing
+  punctuation such as `|`.
+
+Legacy JSON files with delimiter-joined impact keys are still accepted for
+backward compatibility. Loading legacy format emits a migration warning, and
+new saves always write `format_version=2`.
+
+## Optional dependency extras
+
+Core usage is available without visualization/network packages.
+
+- Install visualization features with `pip install pycib[viz]`.
+- Install network-analysis features with `pip install pycib[network]`.
+- Install both optional feature sets with `pip install pycib[all]`.
+
+Top-level `import cib` remains available in minimal environments. Optional
+symbols are loaded lazily and raise actionable `ImportError` messages when the
+corresponding extras are not installed.
+
+## Core consistency and standardization semantics
+
+`CIBMatrix` and `Scenario` isolate descriptor-state mappings at construction.
+Mutating caller-owned descriptor state lists after object construction does not
+change matrix/scenario behaviour.
+
+`CIBMatrix.standardize()` applies semantic judgment-group normalisation over all
+target states in each off-diagonal row. Missing impacts are treated as `0.0`
+during sum/divisor computation, so outputs are invariant to sparse vs
+explicit-zero storage representation.
+
+`ConsistencyChecker` now has a unified tolerance surface across its helper
+methods. `check_consistency`, `check_consistency_detailed`, and
+`find_inconsistent_descriptors` all accept `float_atol` and `float_rtol`
+parameters with stable defaults. This keeps near-tie decisions reproducible
+across core and solver paths when matched tolerance settings are used.
+
+## Monte Carlo tolerance semantics
+
+`MonteCarloAttractorConfig.float_atol` and `float_rtol` are active in Monte
+Carlo successor selection (fast and non-fast paths). Near-tie comparisons use
+these tolerances to decide whether a descriptor state change is required.
+Effective tolerance values are reported in solver diagnostics.
+
+## Monte Carlo completion status semantics
+
+Monte Carlo attractor status is completion-aware and deterministic from
+diagnostics fields:
+
+- `ok`: completion meets target and attractors are found.
+- `no_attractors`: completion meets target and no attractors are found.
+- `partial_timeout`: completion is below target but completed runs still found
+  attractors.
+- `incomplete`: completion is below target with no attractor evidence from
+  completed runs.
+
+`MonteCarloAttractorConfig.completion_status_target_fraction` defines the
+default completion policy used for status interpretation. This policy is
+independent of strict guards (`fail_on_timeout`, `min_completion_fraction`),
+which remain available to enforce hard failure behaviour when required.
+
+## Scenario input validation semantics
+
+`Scenario` now enforces strict input validation at construction:
+
+- Dict-based construction requires exact descriptor-key matching (unknown keys
+  raise `ValueError`; missing keys continue to raise `ValueError`).
+- Index-vector construction accepts integer types (including NumPy integers),
+  but rejects booleans and non-integer values.
+
+Probabilistic model constructors use the same boundary-isolation principle:
+`ProbabilisticCIAModel` stores defensive copies of caller-provided `marginals`
+and `multipliers`, so post-construction external mutations do not alter model
+behaviour.
+
+## Dense probabilistic simplex validation
+
+`cib.prob.model.JointDistribution` validates dense probability vectors at
+construction:
+
+- all entries must be finite,
+- entries must be non-negative within tolerance,
+- total probability mass must sum to 1 within tolerance.
