@@ -1,8 +1,8 @@
 """
 Example: dynamic CIB on DATASET_C10 (workshop-scale dataset).
 
-In this example, a Monte Carlo ensemble is simulated for DATASET_C10 and a
-probability-band plot with numeric summaries is written to the results
+In this example, a Monte Carlo ensemble is simulated for DATASET_C10 and an
+ensemble-share band plot with numeric summaries is written to the results
 directory.
 """
 
@@ -120,7 +120,7 @@ def main() -> None:
         quantiles_by_period=quantiles,
         numeric_expectation_by_period=expectation,
         descriptor=descriptor,
-        title="DATASET_C10: Electrification_Demand (realised) — probability bands + fan + spaghetti",
+        title="DATASET_C10: Electrification_Demand (realised) — ensemble-share bands + fan + spaghetti",
         spaghetti_paths=paths,
         spaghetti_numeric_mapping=mapping,
         spaghetti_max_runs=200,

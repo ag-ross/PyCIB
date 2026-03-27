@@ -62,8 +62,10 @@ def _get_results_dir() -> str:
         return results_dir
 
 
-def _choose_factors() -> list[FactorSpec]:
+def _choose_factors(*, quick_mode: bool = False) -> list[FactorSpec]:
     names = ["Policy_Stringency", "Grid_Flexibility", "Electrification_Demand"]
+    if quick_mode:
+        names = names[:2]
     return [FactorSpec(n, DATASET_B5_DESCRIPTORS[n]) for n in names]
 
 
@@ -194,9 +196,12 @@ def _create_ordered_numeric_mapping(outcomes: list[str]) -> Dict[str, float]:
 
 
 def main() -> None:
-    factors = _choose_factors()
+    quick_mode = os.environ.get("PYCIB_EXAMPLE_QUICK", "0") == "1"
+    factors = _choose_factors(quick_mode=quick_mode)
     index = ScenarioIndex(factors)
     periods = list(DEFAULT_PERIODS)
+    if quick_mode:
+        periods = periods[:2]
 
     # Synthetic joint-distribution probabilistic CIA joint distributions per period are created (using real labels).
     # Different Dirichlet draws are used to induce different marginals per period.
@@ -213,16 +218,24 @@ def main() -> None:
         p_true = p_true_by_period[int(t)]
         marg = marginals_by_period[int(t)]
         multipliers = {}
-        multipliers.update(
-            _multipliers_from_joint(
-                index, p_true, target_factor="Electrification_Demand", given_factor="Policy_Stringency"
+        if "Electrification_Demand" in index.factor_names:
+            multipliers.update(
+                _multipliers_from_joint(
+                    index,
+                    p_true,
+                    target_factor="Electrification_Demand",
+                    given_factor="Policy_Stringency",
+                )
             )
-        )
-        multipliers.update(
-            _multipliers_from_joint(
-                index, p_true, target_factor="Grid_Flexibility", given_factor="Policy_Stringency"
+        if "Grid_Flexibility" in index.factor_names:
+            multipliers.update(
+                _multipliers_from_joint(
+                    index,
+                    p_true,
+                    target_factor="Grid_Flexibility",
+                    given_factor="Policy_Stringency",
+                )
             )
-        )
         models_by_period[int(t)] = ProbabilisticCIAModel(
             factors=factors, marginals=marg, multipliers=multipliers
         )
@@ -233,7 +246,7 @@ def main() -> None:
         method="direct",
         kl_weight=0.0,
         weight_by_target=False,
-        solver_maxiter=5000,
+        solver_maxiter=800 if quick_mode else 5000,
     )
 
     timelines = _state_probability_timelines_from_joint(
@@ -259,8 +272,12 @@ def main() -> None:
 
     print("\nOne conditional check per period:")
     for t in periods:
-        c = dists[int(t)].conditional(("Electrification_Demand", "High"), ("Policy_Stringency", "High"))
-        print(f"  P(Electrification_Demand=High | Policy_Stringency=High) at {t} = {c:.3f}")
+        if "Electrification_Demand" in index.factor_names:
+            c = dists[int(t)].conditional(("Electrification_Demand", "High"), ("Policy_Stringency", "High"))
+            print(f"  P(Electrification_Demand=High | Policy_Stringency=High) at {t} = {c:.3f}")
+        else:
+            c = dists[int(t)].conditional(("Grid_Flexibility", "High"), ("Policy_Stringency", "High"))
+            print(f"  P(Grid_Flexibility=High | Policy_Stringency=High) at {t} = {c:.3f}")
 
     # Plots are generated and saved using the same comprehensive plotting functions
     # as the dynamic CIB notebook.

@@ -71,12 +71,15 @@ def _multipliers_from_joint(
 
 
 def main() -> None:
+    quick_mode = os.environ.get("PYCIB_EXAMPLE_QUICK", "0") == "1"
     factors = [
         FactorSpec("A", ["Low", "Medium", "High"]),
         FactorSpec("B", ["Low", "Medium", "High"]),
         FactorSpec("C", ["Low", "Medium", "High"]),
         FactorSpec("D", ["Low", "Medium", "High"]),
     ]
+    if quick_mode:
+        factors = factors[:3]
     index = ScenarioIndex(factors)
 
     rng = np.random.default_rng(123)
@@ -97,7 +100,7 @@ def main() -> None:
         kl_weight=1e-6,
         weight_by_target=False,
         random_seed=123,
-        solver_maxiter=8000,
+        solver_maxiter=1200 if quick_mode else 8000,
         with_report=True,
     )
     report = dist.fit_report
@@ -125,7 +128,10 @@ def main() -> None:
         print("  multiplier_normalization_issues =", len(diag.multiplier_normalization_issues))
 
     # An identification bound is computed for a selected event (small-space LP).
-    bounds = model.event_probability_bounds(event={"C": "High", "A": "High"}, include_pairwise_targets=True)
+    bounds = model.event_probability_bounds(
+        event={"C": "High", "A": "High"},
+        include_pairwise_targets=True,
+    )
     print("\nIdentification bounds:")
     print("  P(C=High, A=High) in [", bounds.lower, ",", bounds.upper, "]")
 

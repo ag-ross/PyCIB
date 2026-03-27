@@ -23,14 +23,31 @@ def run_example(script_name, description):
     script_path = os.path.join(os.path.dirname(__file__), script_name)
     start_time = time.time()
     
+    timeout_by_script = {
+        "example_dynamic_cib_c15_rare_events.py": 600,
+        "example_probabilistic_cia_static.py": 600,
+        "example_probabilistic_cia_dynamic_refit.py": 600,
+        "example_probabilistic_cia_sparse_kl.py": 600,
+    }
+    timeout_seconds = timeout_by_script.get(script_name, 300)
+
     try:
+        mpl_config = os.path.join(os.path.dirname(os.path.dirname(script_path)), ".mplconfig")
+        os.makedirs(mpl_config, exist_ok=True)
         result = subprocess.run(
             [sys.executable, script_path],
             cwd=os.path.dirname(os.path.dirname(script_path)),
-            env={**os.environ, 'PYTHONPATH': '.'},
+            env={
+                **os.environ,
+                "PYTHONPATH": ".",
+                "MPLBACKEND": "Agg",
+                "MPLCONFIGDIR": mpl_config,
+                # Keep heavy probabilistic examples CI/smoke friendly.
+                "PYCIB_EXAMPLE_QUICK": "1",
+            },
             capture_output=True,
             text=True,
-            timeout=300  # 5 minute timeout
+            timeout=timeout_seconds,
         )
         elapsed = time.time() - start_time
         
@@ -84,6 +101,7 @@ def main():
         ("example_probabilistic_cia_dynamic_predict_update.py", "Example: Joint-Distribution Probabilistic CIA (dynamic predict–update)"),
         ("example_probabilistic_cia_sparse_kl.py", "Example: Joint-Distribution Probabilistic CIA (sparse constraints + KL + bounds)"),
         ("example_probabilistic_cia_scaling_iterative.py", "Example: Joint-Distribution Probabilistic CIA (scaling, iterative approximate)"),
+        ("example_dynamic_cib_c15_rare_events.py", "Example: Dynamic CIB on DATASET_C15 (rare events)"),
     ]
     
     results = []

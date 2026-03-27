@@ -7,6 +7,12 @@ constructed prior to solver execution.
 
 from __future__ import annotations
 
+import os
+import sys
+
+# The repository root is added to the path so that examples can be run directly.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from cib.core import CIBMatrix
 from cib.reduction import reduce_matrix
 

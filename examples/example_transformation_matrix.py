@@ -62,7 +62,10 @@ matrix.set_impact("Economy", "Weak", "Technology", "Slow", 1.0)
 
 # Consistent scenarios are found.
 analyzer = ScenarioAnalyzer(matrix)
-consistent_scenarios = analyzer.find_all_consistent(max_scenarios=5)
+consistent_scenarios = analyzer.find_all_consistent(
+    max_scenarios=5,
+    mode="shortlist",
+)
 
 print(f"\nFound {len(consistent_scenarios)} consistent scenarios:")
 for i, scenario in enumerate(consistent_scenarios):

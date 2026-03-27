@@ -90,6 +90,8 @@ def main() -> None:
     mc_runs = int(os.environ.get("CIB_C10_MC_RUNS", "20000"))
     mc_seed = int(os.environ.get("CIB_C10_MC_SEED", "123"))
     cycle_key_policy = str(os.environ.get("CIB_C10_CYCLE_KEY_POLICY", "min_state"))
+    float_atol = float(os.environ.get("CIB_C10_FLOAT_ATOL", "1e-8"))
+    float_rtol = float(os.environ.get("CIB_C10_FLOAT_RTOL", "1e-5"))
     if cycle_key_policy not in {"min_state", "rotate_min"}:
         raise ValueError("CIB_C10_CYCLE_KEY_POLICY must be 'min_state' or 'rotate_min'")
 
@@ -107,6 +109,8 @@ def main() -> None:
             initial_z_idx=z,
             rule="global",
             max_iterations=500,
+            float_atol=float_atol,
+            float_rtol=float_rtol,
         )
         if not bool(res.is_cycle):
             key = AttractorKey(kind="fixed", value=tuple(int(x) for x in res.attractor))  # type: ignore[arg-type]
@@ -132,12 +136,15 @@ def main() -> None:
         n_jobs=1,
         cycle_mode="keep_cycle",
         cycle_key_policy=cycle_key_policy,  # type: ignore[arg-type]
+        float_atol=float_atol,
+        float_rtol=float_rtol,
     )
     t2 = perf_counter()
     mc = analyzer.find_attractors_monte_carlo(config=mc_cfg)
     t3 = perf_counter()
     print(f"Monte Carlo runtime: {t3 - t2:.2f}s (runs={mc_runs})")
     print(f"Monte Carlo unique attractors: {len(mc.weights)}")
+    print(f"Tie tolerances: float_atol={float_atol:g}, float_rtol={float_rtol:g}")
 
     keys = set(exact_weights.keys()) | set(mc.weights.keys())
     l1 = float(sum(abs(float(exact_weights.get(k, 0.0)) - float(mc.weights.get(k, 0.0))) for k in keys))
@@ -173,6 +180,7 @@ def main() -> None:
         0.98,
         f"exact attractors={len(exact_weights)}\n"
         f"mc runs={mc_runs}\n"
+        f"atol={float_atol:g}, rtol={float_rtol:g}\n"
         f"L1 error={l1:.4f}",
         transform=ax.transAxes,
         va="top",

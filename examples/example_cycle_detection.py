@@ -122,7 +122,7 @@ def example_stochastic_cycle():
     Demonstrate cycle handling in stochastic succession with dynamic shocks.
 
     Dynamic shocks are applied during succession, which can cause
-    different cycle behaviors across runs.
+    different cycle behaviours across runs.
     """
     print("\n" + "=" * 60)
     print("Example 2: Cycle Handling in Stochastic Succession")

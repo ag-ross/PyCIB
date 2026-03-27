@@ -38,7 +38,7 @@ def main() -> None:
     print(f"DATASET_C10 total scenarios: {int(total)}")
 
     t0 = perf_counter()
-    scenarios = analyzer.enumerate_scenarios()
+    scenarios = analyzer.enumerate_scenarios(allow_unbounded=True)
     t1 = perf_counter()
     print(f"Enumerated scenarios: {len(scenarios)}")
 
@@ -186,5 +186,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Keep plotting backend headless to avoid GUI-backend aborts in CI/headless runs.
+    os.environ.setdefault("MPLBACKEND", "Agg")
     main()
 

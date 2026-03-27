@@ -29,15 +29,43 @@ def main() -> None:
     print("Exact solver status:", exact.status)
     print("Exact consistent scenarios:", len(exact.scenarios))
 
-    mc_cfg = MonteCarloAttractorConfig(runs=500, seed=123, succession="global", n_jobs=1)
-    mc = analyzer.find_attractors_monte_carlo(config=mc_cfg)
-    print("Monte Carlo status:", mc.status)
-    print("Monte Carlo unique attractors:", len(mc.counts))
-    top = mc.attractor_keys_ranked[:3]
+    # A strict profile is appropriate for reporting:
+    # completion quality is enforced and diagnostics are inspected explicitly.
+    mc_cfg_strict = MonteCarloAttractorConfig(
+        runs=500,
+        seed=123,
+        succession="global",
+        n_jobs=1,
+        min_completion_fraction=0.995,
+    )
+    mc_strict = analyzer.find_attractors_monte_carlo(config=mc_cfg_strict)
+    print("Monte Carlo (strict) status:", mc_strict.status)
+    print(
+        "Monte Carlo (strict) completion fraction:",
+        mc_strict.diagnostics.get("completion_fraction"),
+    )
+    print("Monte Carlo (strict) unique attractors:", len(mc_strict.counts))
+    top = mc_strict.attractor_keys_ranked[:3]
     for k in top:
-        print("  ", k.kind, mc.counts[k])
+        print("  ", k.kind, mc_strict.counts[k])
 
-    rep = compute_global_sensitivity_attractors(mc, top_k=10)
+    # A permissive profile can be useful for exploratory iteration:
+    # threshold checks are disabled, and timeout diagnostics must be reviewed.
+    mc_cfg_explore = MonteCarloAttractorConfig(
+        runs=500,
+        seed=123,
+        succession="global",
+        n_jobs=1,
+        min_completion_fraction=None,
+        fail_on_timeout=False,
+    )
+    mc_explore = analyzer.find_attractors_monte_carlo(config=mc_cfg_explore)
+    print(
+        "Monte Carlo (explore) n_timeouts:",
+        mc_explore.diagnostics.get("n_timeouts"),
+    )
+
+    rep = compute_global_sensitivity_attractors(mc_strict, top_k=10)
     if rep.rare_outcome_warnings:
         print("Rare-attractor warnings (first 10):")
         for w in rep.rare_outcome_warnings[:10]:

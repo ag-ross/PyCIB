@@ -30,6 +30,7 @@ def main() -> None:
     matrix.set_impacts(DATASET_C10_IMPACTS)
     analyzer = ScenarioAnalyzer(matrix)
 
+    # Strict (reporting) profile.
     mc_cfg = MonteCarloAttractorConfig(
         runs=1500,
         seed=123,
@@ -38,15 +39,18 @@ def main() -> None:
         n_jobs=1,
         cycle_mode="keep_cycle",
         fast_backend="dense",
+        min_completion_fraction=0.995,
     )
     mc = analyzer.find_attractors_monte_carlo(config=mc_cfg)
     print("Monte Carlo status:", mc.status)
     print("Monte Carlo completed runs:", mc.diagnostics.get("n_completed_runs"))
+    print("Monte Carlo completion fraction:", mc.diagnostics.get("completion_fraction"))
     print("Monte Carlo unique attractors:", len(mc.counts))
     top = mc.attractor_keys_ranked[:5]
     for k in top:
         print("  ", k.kind, mc.counts[k])
 
+    # Permissive (exploratory) profile.
     mc_cfg_sparse = MonteCarloAttractorConfig(
         runs=1500,
         seed=123,
@@ -55,12 +59,18 @@ def main() -> None:
         n_jobs=1,
         cycle_mode="keep_cycle",
         fast_backend="sparse",
+        min_completion_fraction=None,
+        fail_on_timeout=False,
     )
     mc_sparse = analyzer.find_attractors_monte_carlo(config=mc_cfg_sparse)
     print("Monte Carlo (sparse backend) status:", mc_sparse.status)
     print(
         "Monte Carlo (sparse backend) unique attractors:",
         len(mc_sparse.counts),
+    )
+    print(
+        "Monte Carlo (sparse backend) n_timeouts:",
+        mc_sparse.diagnostics.get("n_timeouts"),
     )
 
     exact_cfg = ExactSolverConfig(

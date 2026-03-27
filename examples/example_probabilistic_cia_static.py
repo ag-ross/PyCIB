@@ -15,6 +15,7 @@ This example reuses the canonical dataset labels from `cib.example_data`
 from __future__ import annotations
 
 import os
+import sys
 from typing import Dict, Tuple
 
 import matplotlib
@@ -22,14 +23,19 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
+# The repository root is added to the path so that examples can be run directly.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from cib.example_data import DATASET_B5_DESCRIPTORS
 from cib.prob import DiagnosticsReport, FactorSpec, ProbabilisticCIAModel
 from cib.prob.types import ScenarioIndex
 
 
-def _choose_factors() -> list[FactorSpec]:
-    # Keep this example small (5×5×5 = 125 scenarios) while using the real labels.
+def _choose_factors(*, quick_mode: bool = False) -> list[FactorSpec]:
+    # Keep this example small while using real labels.
     names = ["Policy_Stringency", "Grid_Flexibility", "Electrification_Demand"]
+    if quick_mode:
+        names = names[:2]
     return [FactorSpec(n, DATASET_B5_DESCRIPTORS[n]) for n in names]
 
 
@@ -146,7 +152,8 @@ def _plot_marginal_distributions(dist, factors: list[FactorSpec]):
 
 
 def main() -> None:
-    factors = _choose_factors()
+    quick_mode = os.environ.get("PYCIB_EXAMPLE_QUICK", "0") == "1"
+    factors = _choose_factors(quick_mode=quick_mode)
     index = ScenarioIndex(factors)
 
     # A synthetic "true" joint-distribution probabilistic CIA joint distribution is created over the *real*
@@ -156,22 +163,33 @@ def main() -> None:
 
     marginals = _marginals_from_joint(index, p_true)
     multipliers = {}
-    # Multipliers are provided for two pair relations (enough to constrain useful structure).
-    multipliers.update(
-        _multipliers_from_joint(
-            index, p_true, target_factor="Electrification_Demand", given_factor="Policy_Stringency"
+    # Multipliers are provided for one (quick mode) or two pair relations.
+    if "Electrification_Demand" in index.factor_names:
+        multipliers.update(
+            _multipliers_from_joint(
+                index,
+                p_true,
+                target_factor="Electrification_Demand",
+                given_factor="Policy_Stringency",
+            )
         )
-    )
-    multipliers.update(
-        _multipliers_from_joint(
-            index, p_true, target_factor="Grid_Flexibility", given_factor="Policy_Stringency"
+    if "Grid_Flexibility" in index.factor_names:
+        multipliers.update(
+            _multipliers_from_joint(
+                index, p_true, target_factor="Grid_Flexibility", given_factor="Policy_Stringency"
+            )
         )
-    )
 
     model = ProbabilisticCIAModel(factors=factors, marginals=marginals, multipliers=multipliers)
     # For this example, target-based reweighting is avoided because some synthetic
     # pairwise targets can be extremely small, which leads to huge weights.
-    dist = model.fit_joint(method="direct", kl_weight=0.0, weight_by_target=False, solver_maxiter=5000)
+    solver_maxiter = 800 if quick_mode else 5000
+    dist = model.fit_joint(
+        method="direct",
+        kl_weight=0.0,
+        weight_by_target=False,
+        solver_maxiter=solver_maxiter,
+    )
 
     report = DiagnosticsReport.from_distribution(dist, marginals=marginals, multipliers=multipliers)
     print("Diagnostics:")
@@ -188,10 +206,16 @@ def main() -> None:
 
     print()
     print("Implied conditionals (spot check):")
-    print(
-        "  P(Electrification_Demand=High | Policy_Stringency=High) =",
-        dist.conditional(("Electrification_Demand", "High"), ("Policy_Stringency", "High")),
-    )
+    if "Electrification_Demand" in index.factor_names:
+        print(
+            "  P(Electrification_Demand=High | Policy_Stringency=High) =",
+            dist.conditional(("Electrification_Demand", "High"), ("Policy_Stringency", "High")),
+        )
+    else:
+        print(
+            "  P(Grid_Flexibility=High | Policy_Stringency=High) =",
+            dist.conditional(("Grid_Flexibility", "High"), ("Policy_Stringency", "High")),
+        )
 
     # Plots are generated and saved.
     results_dir = _get_results_dir()
