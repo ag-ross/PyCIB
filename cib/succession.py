@@ -38,12 +38,15 @@ class AttractorResult:
             Cycles occur when succession revisits a previously encountered
             scenario, creating a periodic attractor rather than converging
             to a single state.
+        converged: Whether the result is a true attractor (True) or the last
+            state when the iteration cap was reached without convergence (False).
     """
 
     attractor: Union[Scenario, List[Scenario]]
     path: List[Scenario]
     iterations: int
     is_cycle: bool
+    converged: bool = True
 
 
 class SuccessionOperator(ABC):
@@ -75,6 +78,7 @@ class SuccessionOperator(ABC):
         initial: Scenario,
         matrix: CIBMatrix,
         max_iterations: int = 1000,
+        allow_partial: bool = False,
     ) -> AttractorResult:
         """
         Find an attractor (fixed point or cycle) from an initial scenario.
@@ -89,15 +93,19 @@ class SuccessionOperator(ABC):
             initial: Starting scenario.
             matrix: CIB matrix containing impact relationships.
             max_iterations: Maximum number of iterations before stopping.
+            allow_partial: If True, non-convergence within max_iterations does
+                not raise; the last state is returned with converged=False.
 
         Returns:
             AttractorResult containing the attractor and path information.
             If is_cycle is True, the attractor is a list of scenarios
             representing the cycle. If is_cycle is False, the attractor
-            is a single Scenario representing the fixed point.
+            is a single Scenario representing the fixed point. When
+            converged is False, the attractor is the last state reached.
 
         Raises:
-            RuntimeError: If max_iterations is exceeded without convergence.
+            RuntimeError: When allow_partial is False, raised if max_iterations
+                is exceeded without convergence.
         """
         path: List[Scenario] = [initial]
         visited: dict[Scenario, int] = {initial: 0}
@@ -130,6 +138,14 @@ class SuccessionOperator(ABC):
             visited[successor] = iteration
             current = successor
 
+        if allow_partial:
+            return AttractorResult(
+                attractor=current,
+                path=path,
+                iterations=max_iterations,
+                is_cycle=False,
+                converged=False,
+            )
         raise RuntimeError(
             f"Succession did not converge within {max_iterations} iterations"
         )
@@ -142,6 +158,10 @@ class GlobalSuccession(SuccessionOperator):
     Adjusts all inconsistent descriptors simultaneously to their
     maximum-impact states. This is the most common succession rule.
     """
+
+    def __init__(self, *, float_atol: float = 0.0, float_rtol: float = 0.0) -> None:
+        self.float_atol = float(float_atol)
+        self.float_rtol = float(float_rtol)
 
     def find_successor(
         self, scenario: Scenario, matrix: CIBMatrix
@@ -158,11 +178,26 @@ class GlobalSuccession(SuccessionOperator):
             states.
         """
         balance = ImpactBalance(scenario, matrix)
-        max_states = balance.get_max_states()
 
         new_state_dict: dict[str, str] = {}
         for descriptor in matrix.descriptors:
-            new_state_dict[descriptor] = max_states[descriptor]
+            current_state = scenario.get_state(descriptor)
+            current_score = float(balance.get_score(descriptor, current_state))
+            state_scores = balance.balance[descriptor]
+            max_state = max(state_scores, key=state_scores.get)
+            max_score = float(state_scores[max_state])
+            if float(self.float_atol) == 0.0 and float(self.float_rtol) == 0.0:
+                # Preserve legacy behavior exactly when no tolerance is requested.
+                new_state_dict[descriptor] = max_state
+            elif np.isclose(
+                current_score,
+                max_score,
+                atol=float(self.float_atol),
+                rtol=float(self.float_rtol),
+            ):
+                new_state_dict[descriptor] = current_state
+            else:
+                new_state_dict[descriptor] = max_state
 
         return Scenario(new_state_dict, matrix)
 
@@ -331,6 +366,10 @@ class LocalSuccession(SuccessionOperator):
     gap between current and maximum impact score).
     """
 
+    def __init__(self, *, float_atol: float = 0.0, float_rtol: float = 0.0) -> None:
+        self.float_atol = float(float_atol)
+        self.float_rtol = float(float_rtol)
+
     def find_successor(
         self, scenario: Scenario, matrix: CIBMatrix
     ) -> Scenario:
@@ -346,7 +385,6 @@ class LocalSuccession(SuccessionOperator):
             its maximum-impact state.
         """
         balance = ImpactBalance(scenario, matrix)
-        max_states = balance.get_max_states()
 
         new_state_dict = scenario.to_dict()
         max_gap = float("-inf")
@@ -355,7 +393,8 @@ class LocalSuccession(SuccessionOperator):
         for descriptor in matrix.descriptors:
             current_state = scenario.get_state(descriptor)
             current_score = balance.get_score(descriptor, current_state)
-            max_state = max_states[descriptor]
+            state_scores = balance.balance[descriptor]
+            max_state = max(state_scores, key=state_scores.get)
             max_score = balance.get_score(descriptor, max_state)
 
             gap = max_score - current_score
@@ -363,8 +402,18 @@ class LocalSuccession(SuccessionOperator):
                 max_gap = gap
                 target_descriptor = descriptor
 
-        if target_descriptor is not None and max_gap > 0:
-            new_state_dict[target_descriptor] = max_states[target_descriptor]
+        if (
+            target_descriptor is not None
+            and max_gap > 0
+            and not np.isclose(
+                max_gap,
+                0.0,
+                atol=float(self.float_atol),
+                rtol=float(self.float_rtol),
+            )
+        ):
+            target_scores = balance.balance[target_descriptor]
+            new_state_dict[target_descriptor] = max(target_scores, key=target_scores.get)
 
         return Scenario(new_state_dict, matrix)
 
@@ -379,10 +428,10 @@ class AttractorFinder:
 
     def __init__(self, matrix: CIBMatrix) -> None:
         """
-        Initialize attractor finder with a CIB matrix.
+        The attractor finder is initialised with a CIB matrix.
 
         Args:
-            matrix: CIB matrix to analyze.
+            matrix: CIB matrix to analyse.
         """
         self.matrix = matrix
 
@@ -462,7 +511,7 @@ class AttractorFinder:
         Enumerate all consistent scenarios (exhaustive search).
 
         Args:
-            matrix: CIB matrix to analyze.
+            matrix: CIB matrix to analyse.
 
         Returns:
             List of all consistent scenarios.

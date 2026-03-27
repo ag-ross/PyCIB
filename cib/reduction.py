@@ -39,7 +39,7 @@ def bin_states(
     mapping: Mapping[str, Mapping[str, str]],
 ) -> CIBMatrix:
     """
-    Create a reduced matrix by mapping fine states to binned states.
+    A reduced matrix is created by mapping fine states to binned states.
 
     Args:
         matrix: Original CIB matrix.

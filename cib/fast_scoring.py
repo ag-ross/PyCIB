@@ -12,7 +12,7 @@ The backend is intended as an internal optimisation. The public API of
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence
 
 import numpy as np
 
@@ -38,11 +38,27 @@ class FastCIBScorer:
     state_index: Sequence[Mapping[str, int]]
 
     @staticmethod
-    def from_matrix(matrix: CIBMatrix) -> "FastCIBScorer":
+    def from_matrix(
+        matrix: CIBMatrix,
+        *,
+        max_workspace_bytes: Optional[int] = None,
+    ) -> "FastCIBScorer":
         descriptors = list(matrix.descriptors.keys())
         state_labels: List[List[str]] = [list(matrix.descriptors[d]) for d in descriptors]
         state_counts = np.asarray([len(s) for s in state_labels], dtype=np.int64)
         max_states = int(state_counts.max()) if len(state_counts) else 0
+        n_desc = len(descriptors)
+
+        if max_workspace_bytes is not None and n_desc > 0 and max_states > 0:
+            est = n_desc * max_states * n_desc * max_states * 8
+            if int(est) > int(max_workspace_bytes):
+                raise MemoryError(
+                    "FastCIBScorer dense impact tensor would exceed max_workspace_bytes: "
+                    f"estimated {est} bytes for shape "
+                    f"({n_desc}, {max_states}, {n_desc}, {max_states}) float64 "
+                    f"(limit {int(max_workspace_bytes)}). "
+                    "Use a sparse backend, reduce descriptors/states, or raise the limit."
+                )
 
         desc_to_idx: Dict[str, int] = {d: i for i, d in enumerate(descriptors)}
         state_to_idx: List[Dict[str, int]] = []
@@ -95,6 +111,14 @@ class FastCIBScorer:
             raise ValueError(
                 f"z_idx must have shape ({n_desc},), but shape {tuple(z.shape)} was provided"
             )
+        for j in range(n_desc):
+            idx = int(z[j])
+            max_idx = int(self.state_counts[j]) - 1
+            if idx < 0 or idx > max_idx:
+                raise ValueError(
+                    f"State index {idx} out of range [0, {max_idx}] for descriptor "
+                    f"'{self.descriptors[j]}'"
+                )
 
         contrib = self.impact[np.arange(n_desc), z, :, :]
         scores = contrib.sum(axis=0, dtype=np.float64)
@@ -116,6 +140,22 @@ class FastCIBScorer:
         j = int(changed_descriptor_idx)
         old = int(old_state_idx)
         new = int(new_state_idx)
+        n_desc = int(len(self.descriptors))
+        if j < 0 or j >= n_desc:
+            raise ValueError(
+                f"changed_descriptor_idx {j} out of range [0, {n_desc - 1}]"
+            )
+        max_idx = int(self.state_counts[j]) - 1
+        if old < 0 or old > max_idx:
+            raise ValueError(
+                f"old_state_idx {old} out of range [0, {max_idx}] for descriptor "
+                f"'{self.descriptors[j]}'"
+            )
+        if new < 0 or new > max_idx:
+            raise ValueError(
+                f"new_state_idx {new} out of range [0, {max_idx}] for descriptor "
+                f"'{self.descriptors[j]}'"
+            )
         scores += self.impact[j, new, :, :] - self.impact[j, old, :, :]
         return scores
 
@@ -127,7 +167,7 @@ class FastCIBScorer:
         float_rtol: float = 1e-05,
     ) -> bool:
         """
-        Check CIB consistency of a scenario using the fast scoring backend.
+        CIB consistency of a scenario is checked using the fast scoring backend.
 
         Ties are handled using `np.isclose` with configurable tolerances so that
         behaviour can be matched to the reference slow path.

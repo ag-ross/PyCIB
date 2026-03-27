@@ -54,6 +54,8 @@ def run_to_attractor_indices(
     initial_z_idx: Sequence[int],
     rule: SuccessionRule = "global",
     max_iterations: int = 1000,
+    float_atol: float = 0.0,
+    float_rtol: float = 0.0,
 ) -> AttractorIndicesResult:
     """
     Run succession until a fixed point or a cycle is reached.
@@ -84,7 +86,19 @@ def run_to_attractor_indices(
             changed: list[int] = []
             for j in range(n_desc):
                 n_states = int(scorer.state_counts[j])
+                chosen_idx = int(z[j])
                 nxt_j = int(np.argmax(scores[j, :n_states]))
+                chosen_score = float(scores[j, chosen_idx])
+                best_score = float(scores[j, nxt_j])
+                if (
+                    float(float_atol) > 0.0 or float(float_rtol) > 0.0
+                ) and np.isclose(
+                    chosen_score,
+                    best_score,
+                    atol=float(float_atol),
+                    rtol=float(float_rtol),
+                ):
+                    nxt_j = chosen_idx
                 nxt[j] = nxt_j
                 if nxt_j != int(z[j]):
                     changed.append(j)
@@ -105,7 +119,17 @@ def run_to_attractor_indices(
                     target = j
                     target_state = best_idx
             changed = []
-            if target is not None and target_state is not None and best_gap > 0.0:
+            if (
+                target is not None
+                and target_state is not None
+                and best_gap > 0.0
+                and not np.isclose(
+                    best_gap,
+                    0.0,
+                    atol=float(float_atol),
+                    rtol=float(float_rtol),
+                )
+            ):
                 changed = [int(target)]
                 nxt[int(target)] = int(target_state)
         else:

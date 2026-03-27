@@ -9,10 +9,14 @@ for computing impact scores.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple, Union
+from numbers import Integral
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
+
+DEFAULT_FAST_SCORER_WORKSPACE_BYTES = 512 * 1024 * 1024
 
 
 class CIBMatrix:
@@ -33,7 +37,7 @@ class CIBMatrix:
 
     def __init__(self, descriptors: Dict[str, List[str]]) -> None:
         """
-        Initialize CIB matrix with descriptor definitions.
+        The CIB matrix is initialised with descriptor definitions.
 
         Args:
             descriptors: Dictionary mapping descriptor names to lists of
@@ -56,7 +60,7 @@ class CIBMatrix:
                     f"Descriptor '{desc_name}' has duplicate states"
                 )
 
-        self.descriptors: Dict[str, List[str]] = descriptors.copy()
+        self.descriptors: Dict[str, List[str]] = copy.deepcopy(descriptors)
         self.n_descriptors: int = len(descriptors)
         self.state_counts: List[int] = [
             len(states) for states in descriptors.values()
@@ -72,7 +76,7 @@ class CIBMatrix:
         value: float,
     ) -> None:
         """
-        Set a single impact value in the matrix.
+        A single impact value in the matrix is set.
 
         Args:
             src_desc: Source descriptor name.
@@ -110,7 +114,7 @@ class CIBMatrix:
         self, impacts: Dict[Tuple[str, str, str, str], float]
     ) -> None:
         """
-        Set multiple impact values in bulk.
+        Multiple impact values are set in bulk.
 
         Args:
             impacts: Dictionary mapping (src_desc, src_state, tgt_desc,
@@ -124,22 +128,31 @@ class CIBMatrix:
             self.set_impact(src_desc, src_state, tgt_desc, tgt_state, value)
 
     def get_impact(
-        self, src_desc: str, src_state: str, tgt_desc: str, tgt_state: str
+        self,
+        src_desc: str,
+        src_state: str,
+        tgt_desc: str,
+        tgt_state: str,
+        *,
+        strict: bool = False,
     ) -> float:
         """
-        Retrieve an impact value from the matrix.
+        An impact value is retrieved from the matrix.
 
         Args:
             src_desc: Source descriptor name.
             src_state: Source state label.
             tgt_desc: Target descriptor name.
             tgt_state: Target state label.
+            strict: If True, raises ``KeyError`` when the cell was never set
+                (default treats missing cells as 0.0).
 
         Returns:
-            The impact value, or 0.0 if not explicitly set.
+            The impact value, or 0.0 if not explicitly set (unless ``strict``).
 
         Raises:
             ValueError: If descriptor or state names are not found.
+            KeyError: If ``strict`` is True and the impact was not stored.
         """
         if src_desc not in self.descriptors:
             raise ValueError(f"Source descriptor '{src_desc}' not found")
@@ -157,11 +170,13 @@ class CIBMatrix:
             )
 
         key = (src_desc, src_state, tgt_desc, tgt_state)
+        if strict and key not in self._impacts:
+            raise KeyError(key)
         return self._impacts.get(key, 0.0)
 
     def iter_impacts(self):
         """
-        Iterate over explicitly stored non-zero impacts.
+        Explicitly stored non-zero impacts are iterated over.
 
         Returns:
             An iterator over ((src_desc, src_state, tgt_desc, tgt_state), value) pairs.
@@ -172,7 +187,7 @@ class CIBMatrix:
         self, scenario: Scenario, descriptor: str, state: str
     ) -> float:
         """
-        Calculate impact score for a specific descriptor-state combination.
+        Impact score for a specific descriptor-state combination is calculated.
 
         The impact score θ_jl represents the sum of all impacts from other
         descriptors' current states in the scenario to the target state.
@@ -209,7 +224,7 @@ class CIBMatrix:
         self, scenario: Scenario, descriptor: str
     ) -> Dict[str, float]:
         """
-        Calculate impact balance for all states of a descriptor.
+        Impact balance for all states of a descriptor is calculated.
 
         Args:
             scenario: The scenario containing current state assignments.
@@ -234,11 +249,11 @@ class CIBMatrix:
 
     def standardize(self) -> None:
         """
-        Apply standardization to judgment groups.
+        Standardisation is applied to judgment groups.
 
-        For each judgment group (row in a judgment section), ensure the
-        sum equals zero by adjusting values. This implements IO-1
-        (Addition Invariance) normalization.
+        For each judgment group (row in a judgment section), the sum is
+        made to equal zero by adjusting values. IO-1 (Addition Invariance)
+        normalisation is implemented.
         """
         for src_desc in self.descriptors:
             for src_state in self.descriptors[src_desc]:
@@ -249,8 +264,7 @@ class CIBMatrix:
                     judgment_group = []
                     for tgt_state in self.descriptors[tgt_desc]:
                         key = (src_desc, src_state, tgt_desc, tgt_state)
-                        if key in self._impacts:
-                            judgment_group.append((key, self._impacts[key]))
+                        judgment_group.append((key, self._impacts.get(key, 0.0)))
 
                     if judgment_group:
                         current_sum = sum(val for _, val in judgment_group)
@@ -262,10 +276,10 @@ class CIBMatrix:
         self, descriptor: str, state: str, value: float
     ) -> None:
         """
-        Apply IO-1 (Addition Invariance) operation.
+        IO-1 (Addition Invariance) operation is applied.
 
-        Add a constant value to all cells in a judgment group. This preserves
-        consistency relationships.
+        A constant value is added to all cells in a judgment group. Consistency
+        relationships are preserved.
 
         Args:
             descriptor: Source descriptor name.
@@ -294,10 +308,10 @@ class CIBMatrix:
 
     def apply_io2(self, descriptor: str, multiplier: float) -> None:
         """
-        Apply IO-2 (Local Multiplication Invariance) operation.
+        IO-2 (Local Multiplication Invariance) operation is applied.
 
-        Multiply all cells in a descriptor column by a positive number.
-        This preserves consistency relationships.
+        All cells in a descriptor column are multiplied by a positive number.
+        Consistency relationships are preserved.
 
         Args:
             descriptor: Target descriptor name.
@@ -323,10 +337,10 @@ class CIBMatrix:
 
     def apply_io3(self, multiplier: float) -> None:
         """
-        Apply IO-3 (Global Multiplication Invariance) operation.
+        IO-3 (Global Multiplication Invariance) operation is applied.
 
-        Multiply the entire (off-diagonal) matrix by a positive number.
-        This preserves consistency relationships.
+        The entire (off-diagonal) matrix is multiplied by a positive number.
+        Consistency relationships are preserved.
 
         Args:
             multiplier: Positive multiplier value.
@@ -349,10 +363,11 @@ class CIBMatrix:
         value: float,
     ) -> None:
         """
-        Apply IO-4 (Transfer Invariance) operation.
+        IO-4 (Transfer Invariance) operation is applied.
 
-        Transfer a constant between two judgment groups (rows) within the same
-        judgment section (src_desc -> tgt_desc), while preserving consistency.
+        A constant is transferred between two judgment groups (rows) within the
+        same judgment section (src_desc -> tgt_desc), whilst consistency is
+        preserved.
 
         Operationally:
           - Subtract `value` from all cells (src_desc, from_state, tgt_desc, *)
@@ -418,7 +433,7 @@ class Scenario:
         matrix: CIBMatrix,
     ) -> None:
         """
-        Create a scenario from a state dictionary or index list.
+        A scenario is created from a state dictionary or index list.
 
         Args:
             state_dict: Either a dictionary mapping descriptor names to
@@ -429,10 +444,17 @@ class Scenario:
             ValueError: If state assignments are invalid.
         """
         self.descriptors: List[str] = list(matrix.descriptors.keys())
-        self._descriptor_states: Dict[str, List[str]] = matrix.descriptors.copy()
+        self._descriptor_states: Dict[str, List[str]] = copy.deepcopy(matrix.descriptors)
         self._state_indices: List[int] = []
 
         if isinstance(state_dict, dict):
+            unknown_descriptors = sorted(
+                set(state_dict.keys()).difference(set(self.descriptors))
+            )
+            if unknown_descriptors:
+                raise ValueError(
+                    f"Unknown descriptor keys in state assignment: {unknown_descriptors}"
+                )
             for desc in self.descriptors:
                 if desc not in state_dict:
                     raise ValueError(
@@ -453,17 +475,23 @@ class Scenario:
                     f"number of descriptors {len(self.descriptors)}"
                 )
             for idx, state_idx in enumerate(state_dict):
-                max_idx = matrix.state_counts[idx] - 1
-                if state_idx < 0 or state_idx > max_idx:
+                if isinstance(state_idx, bool) or not isinstance(state_idx, Integral):
                     raise ValueError(
-                        f"State index {state_idx} out of range [0, {max_idx}] "
+                        f"State index {state_idx!r} must be an integer for "
+                        f"descriptor '{self.descriptors[idx]}'"
+                    )
+                state_idx_int = int(state_idx)
+                max_idx = matrix.state_counts[idx] - 1
+                if state_idx_int < 0 or state_idx_int > max_idx:
+                    raise ValueError(
+                        f"State index {state_idx_int} out of range [0, {max_idx}] "
                         f"for descriptor '{self.descriptors[idx]}'"
                     )
-            self._state_indices = list(state_dict)
+            self._state_indices = [int(x) for x in state_dict]
 
     def get_state(self, descriptor: str) -> str:
         """
-        Get the state label for a descriptor.
+        The state label for a descriptor is returned.
 
         Args:
             descriptor: Descriptor name.
@@ -482,7 +510,7 @@ class Scenario:
 
     def get_state_index(self, descriptor: str) -> int:
         """
-        Get the 0-based state index for a descriptor.
+        The 0-based state index for a descriptor is returned.
 
         Args:
             descriptor: Descriptor name.
@@ -500,7 +528,7 @@ class Scenario:
 
     def to_dict(self) -> Dict[str, str]:
         """
-        Convert scenario to dictionary mapping.
+        The scenario is converted to a dictionary mapping.
 
         Returns:
             Dictionary mapping descriptor names to state labels.
@@ -512,16 +540,31 @@ class Scenario:
 
     def to_indices(self) -> List[int]:
         """
-        Convert scenario to index vector.
+        The scenario is converted to an index vector.
 
         Returns:
             List of 0-based state indices.
         """
         return self._state_indices.copy()
 
+    def semantic_key(self) -> Tuple[Tuple[str, str], ...]:
+        """
+        A descriptor-order-independent key for semantic state assignment.
+
+        Useful when comparing scenarios built from matrices whose descriptor
+        dict iteration order may differ.
+        """
+        pairs = tuple(
+            sorted(
+                ((str(d), str(self.get_state(d))) for d in self.descriptors),
+                key=lambda t: t[0],
+            )
+        )
+        return pairs
+
     def __eq__(self, other: object) -> bool:
         """
-        Check equality with another scenario.
+        Equality with another scenario is checked.
 
         Args:
             other: Another Scenario object.
@@ -538,7 +581,7 @@ class Scenario:
 
     def __hash__(self) -> int:
         """
-        Compute hash for scenario.
+        The hash for the scenario is computed.
 
         Returns:
             Hash value for use in sets and dictionaries.
@@ -547,7 +590,7 @@ class Scenario:
 
     def __repr__(self) -> str:
         """
-        Generate string representation of scenario.
+        A string representation of the scenario is generated.
 
         Returns:
             Readable string representation.
@@ -558,7 +601,7 @@ class Scenario:
 
 class ConsistencyChecker:
     """
-    Checks scenario consistency against CIB matrix.
+    Scenario consistency against the CIB matrix is checked.
 
     A scenario is consistent if for each descriptor j, the chosen state z_j
     has the maximum (or equal maximum) impact score among all possible states.
@@ -569,13 +612,24 @@ class ConsistencyChecker:
         scenario: Scenario,
         matrix: CIBMatrix,
         use_fast: bool = False,
+        out_diagnostics: Optional[Dict[str, Any]] = None,
+        *,
+        max_fast_workspace_bytes: Optional[int] = DEFAULT_FAST_SCORER_WORKSPACE_BYTES,
+        float_atol: float = 1e-08,
+        float_rtol: float = 1e-05,
     ) -> bool:
         """
-        Verify if a scenario satisfies the consistency condition.
+        Whether a scenario satisfies the consistency condition is verified.
 
         Args:
             scenario: Scenario to check.
             matrix: CIB matrix containing impact relationships.
+            max_fast_workspace_bytes: Optional workspace byte cap for
+                ``FastCIBScorer`` allocation when ``use_fast`` is True. Set
+                ``None`` to disable preflight capping.
+            out_diagnostics: If provided, may be updated with keys such as
+                ``fast_path_failed`` and ``fast_path_error`` when the fast path
+                errors and the reference implementation is used instead.
 
         Returns:
             True if scenario is consistent, False otherwise.
@@ -584,9 +638,20 @@ class ConsistencyChecker:
             try:
                 from cib.fast_scoring import FastCIBScorer
 
-                scorer = FastCIBScorer.from_matrix(matrix)
-                return bool(scorer.is_consistent(scorer.scenario_to_indices(scenario)))
-            except Exception:
+                scorer = FastCIBScorer.from_matrix(
+                    matrix, max_workspace_bytes=max_fast_workspace_bytes
+                )
+                return bool(
+                    scorer.is_consistent(
+                        scorer.scenario_to_indices(scenario),
+                        float_atol=float(float_atol),
+                        float_rtol=float(float_rtol),
+                    )
+                )
+            except (MemoryError, ValueError, TypeError) as exc:
+                if out_diagnostics is not None:
+                    out_diagnostics["fast_path_failed"] = True
+                    out_diagnostics["fast_path_error"] = repr(exc)
                 # The reference implementation is used as a safe fallback.
                 pass
 
@@ -596,17 +661,29 @@ class ConsistencyChecker:
             current_score = balance[current_state]
 
             for state, score in balance.items():
-                if not np.isclose(score, current_score) and score > current_score:
+                if (
+                    not np.isclose(
+                        score,
+                        current_score,
+                        atol=float(float_atol),
+                        rtol=float(float_rtol),
+                    )
+                    and score > current_score
+                ):
                     return False
 
         return True
 
     @staticmethod
     def check_consistency_detailed(
-        scenario: Scenario, matrix: CIBMatrix
+        scenario: Scenario,
+        matrix: CIBMatrix,
+        *,
+        float_atol: float = 1e-08,
+        float_rtol: float = 1e-05,
     ) -> Dict[str, Any]:
         """
-        Check consistency and return detailed diagnostics.
+        Consistency is checked and detailed diagnostics are returned.
 
         Args:
             scenario: Scenario to check.
@@ -627,7 +704,15 @@ class ConsistencyChecker:
             current_score = balance[current_state]
 
             for state, score in balance.items():
-                if not np.isclose(score, current_score) and score > current_score:
+                if (
+                    not np.isclose(
+                        score,
+                        current_score,
+                        atol=float(float_atol),
+                        rtol=float(float_rtol),
+                    )
+                    and score > current_score
+                ):
                     is_consistent = False
                     inconsistencies.append(
                         {
@@ -643,14 +728,20 @@ class ConsistencyChecker:
             "is_consistent": is_consistent,
             "balances": balances,
             "inconsistencies": inconsistencies,
+            "float_atol": float(float_atol),
+            "float_rtol": float(float_rtol),
         }
 
     @staticmethod
     def find_inconsistent_descriptors(
-        scenario: Scenario, matrix: CIBMatrix
+        scenario: Scenario,
+        matrix: CIBMatrix,
+        *,
+        float_atol: float = 1e-08,
+        float_rtol: float = 1e-05,
     ) -> List[str]:
         """
-        Find descriptors that violate consistency condition.
+        Descriptors that violate the consistency condition are found.
 
         Args:
             scenario: Scenario to check.
@@ -666,7 +757,15 @@ class ConsistencyChecker:
             current_score = balance[current_state]
 
             for state, score in balance.items():
-                if not np.isclose(score, current_score) and score > current_score:
+                if (
+                    not np.isclose(
+                        score,
+                        current_score,
+                        atol=float(float_atol),
+                        rtol=float(float_rtol),
+                    )
+                    and score > current_score
+                ):
                     if descriptor not in inconsistent:
                         inconsistent.append(descriptor)
                     break
@@ -677,7 +776,7 @@ class ConsistencyChecker:
 @dataclass
 class ImpactBalance:
     """
-    Stores impact balance calculations for a scenario.
+    Impact balance calculations for a scenario are stored.
 
     The impact balance contains impact scores for all descriptor-state
     combinations, computed from the scenario's current state assignments.
@@ -691,7 +790,7 @@ class ImpactBalance:
 
     def __init__(self, scenario: Scenario, matrix: CIBMatrix) -> None:
         """
-        Compute impact balance for a scenario.
+        Impact balance for a scenario is computed.
 
         Args:
             scenario: Scenario containing state assignments.
@@ -705,7 +804,7 @@ class ImpactBalance:
 
     def get_max_state(self, descriptor: str) -> str:
         """
-        Get the state with maximum impact score for a descriptor.
+        The state with maximum impact score for a descriptor is returned.
 
         Args:
             descriptor: Descriptor name.
@@ -734,7 +833,7 @@ class ImpactBalance:
 
     def get_max_states(self) -> Dict[str, str]:
         """
-        Get all maximum-impact states for all descriptors.
+        All maximum-impact states for all descriptors are returned.
 
         Returns:
             Dictionary mapping descriptor names to their maximum-impact
@@ -747,7 +846,7 @@ class ImpactBalance:
 
     def get_score(self, descriptor: str, state: str) -> float:
         """
-        Retrieve impact score for a specific descriptor-state combination.
+        Impact score for a specific descriptor-state combination is retrieved.
 
         Args:
             descriptor: Descriptor name.

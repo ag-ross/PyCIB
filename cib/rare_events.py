@@ -48,12 +48,14 @@ def wilson_interval_from_count(k: int, n: int, *, level: float = 0.95) -> Binomi
     if not (0.0 < level < 1.0):
         raise ValueError("level must be between 0 and 1")
 
-    # SciPy preferred; fallback supports common levels.
     try:
         from scipy.stats import norm  # type: ignore
+    except (ImportError, ModuleNotFoundError):
+        norm = None  # type: ignore[assignment]
 
+    if norm is not None:
         z = float(norm.ppf(0.5 + level / 2.0))
-    except Exception:
+    else:
         if np.isclose(level, 0.95):
             z = 1.96
         elif np.isclose(level, 0.99):
@@ -61,7 +63,10 @@ def wilson_interval_from_count(k: int, n: int, *, level: float = 0.95) -> Binomi
         elif np.isclose(level, 0.90):
             z = 1.645
         else:
-            z = 1.96
+            raise ValueError(
+                "Confidence level requires SciPy unless level is 0.90, 0.95, or 0.99 "
+                f"(got level={level}). Install scipy or use a tabulated level."
+            )
 
     p = k / n
     denominator = 1.0 + (z**2 / n)

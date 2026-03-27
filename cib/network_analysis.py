@@ -8,17 +8,25 @@ structure.
 
 from __future__ import annotations
 
+import heapq
+import time
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from cib.core import CIBMatrix, Scenario
 
 try:
     import networkx as nx
-except ImportError as exc:  # pragma: no cover
-    raise ImportError(
-        "Network analysis requires networkx. Install with: pip install networkx"
-    ) from exc
+except ImportError:  # pragma: no cover
+    nx = None  # type: ignore[assignment]
+
+
+def _require_networkx():
+    if nx is None:
+        raise ImportError(
+            "Network analysis requires networkx. Install with: pip install pycib[network]"
+        )
+    return nx
 
 
 def _impact_direction(value: float) -> str:
@@ -48,6 +56,91 @@ class AggregationResult:
     absolute: float
 
 
+@dataclass(frozen=True)
+class PathwaySearchMetadata:
+    """Metadata describing bounded pathway enumeration completeness."""
+
+    is_complete: bool
+    truncated_by_max_paths: bool
+    truncated_by_time_limit: bool
+    enumerated_paths: int
+    returned_paths: int
+    max_paths: Optional[int]
+    time_limit_s: Optional[float]
+    elapsed_s: float
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return metadata as a plain dictionary."""
+        return {
+            "is_complete": bool(self.is_complete),
+            "truncated_by_max_paths": bool(self.truncated_by_max_paths),
+            "truncated_by_time_limit": bool(self.truncated_by_time_limit),
+            "enumerated_paths": int(self.enumerated_paths),
+            "returned_paths": int(self.returned_paths),
+            "max_paths": None if self.max_paths is None else int(self.max_paths),
+            "time_limit_s": None if self.time_limit_s is None else float(self.time_limit_s),
+            "elapsed_s": float(self.elapsed_s),
+        }
+
+
+def _collect_ranked_paths_bounded(
+    *,
+    path_iter: Iterable[Sequence[str]],
+    path_strength_fn,
+    max_paths: Optional[int],
+    time_limit_s: Optional[float],
+) -> Tuple[List[List[str]], PathwaySearchMetadata]:
+    """Collect and rank simple paths with optional bounds."""
+    start = time.perf_counter()
+    truncated_by_max_paths = False
+    truncated_by_time_limit = False
+    enumerated_paths = 0
+    k = None if max_paths is None else int(max_paths)
+
+    if k is None:
+        all_paths: List[Tuple[float, List[str]]] = []
+        for p in path_iter:
+            elapsed = time.perf_counter() - start
+            if time_limit_s is not None and elapsed >= float(time_limit_s):
+                truncated_by_time_limit = True
+                break
+            pp = list(map(str, p))
+            all_paths.append((float(path_strength_fn(pp)), pp))
+            enumerated_paths += 1
+        all_paths.sort(key=lambda x: x[0], reverse=True)
+        ranked = [p for _, p in all_paths]
+    else:
+        heap: List[Tuple[float, List[str]]] = []
+        for p in path_iter:
+            elapsed = time.perf_counter() - start
+            if time_limit_s is not None and elapsed >= float(time_limit_s):
+                truncated_by_time_limit = True
+                break
+            pp = list(map(str, p))
+            score = float(path_strength_fn(pp))
+            if len(heap) < k:
+                heapq.heappush(heap, (score, pp))
+            elif score > heap[0][0]:
+                heapq.heapreplace(heap, (score, pp))
+            enumerated_paths += 1
+        if enumerated_paths > k:
+            truncated_by_max_paths = True
+        ranked = [p for _, p in sorted(heap, key=lambda x: x[0], reverse=True)]
+
+    elapsed_s = float(time.perf_counter() - start)
+    meta = PathwaySearchMetadata(
+        is_complete=not (truncated_by_max_paths or truncated_by_time_limit),
+        truncated_by_max_paths=truncated_by_max_paths,
+        truncated_by_time_limit=truncated_by_time_limit,
+        enumerated_paths=enumerated_paths,
+        returned_paths=len(ranked),
+        max_paths=k,
+        time_limit_s=None if time_limit_s is None else float(time_limit_s),
+        elapsed_s=elapsed_s,
+    )
+    return ranked, meta
+
+
 class NetworkGraphBuilder:
     """
     Builds networkx graphs from CIB matrices for analysis.
@@ -58,7 +151,7 @@ class NetworkGraphBuilder:
 
     def __init__(self, matrix: CIBMatrix) -> None:
         """
-        Initialize graph builder with a CIB matrix.
+        The graph builder is initialised with a CIB matrix.
 
         Args:
             matrix: CIB matrix containing impact relationships.
@@ -102,7 +195,8 @@ class NetworkGraphBuilder:
         Raises:
             ValueError: If aggregation is unknown or weighted inputs are invalid.
         """
-        graph = nx.DiGraph()
+        nx_mod = _require_networkx()
+        graph = nx_mod.DiGraph()
         for desc in self.matrix.descriptors.keys():
             graph.add_node(desc)
 
@@ -153,7 +247,7 @@ class NetworkGraphBuilder:
           - src_state = scenario.get_state(src)
           - tgt_state = scenario.get_state(tgt)
           - weight = matrix.get_impact(src, src_state, tgt, tgt_state)
-          - Add the edge only if abs(weight) exceeds the configured threshold.
+          - The edge is added only if abs(weight) exceeds the configured threshold.
 
         When scenario is None:
         - Returns the aggregated network (same as build_impact_network()).
@@ -177,7 +271,8 @@ class NetworkGraphBuilder:
                 state_probabilities=state_probabilities,
             )
 
-        graph = nx.DiGraph()
+        nx_mod = _require_networkx()
+        graph = nx_mod.DiGraph()
         for desc in self.matrix.descriptors.keys():
             graph.add_node(desc)
 
@@ -313,10 +408,10 @@ class NetworkAnalyzer:
 
     def __init__(self, matrix: CIBMatrix) -> None:
         """
-        Initialize analyzer with a CIB matrix.
+        The analyser is initialised with a CIB matrix.
 
         Args:
-            matrix: CIB matrix to analyze.
+            matrix: CIB matrix to analyse.
         """
         self.matrix = matrix
         self._builder = NetworkGraphBuilder(matrix)
@@ -334,12 +429,13 @@ class NetworkAnalyzer:
             Dictionary mapping descriptor names to centrality metrics.
         """
         graph = self._builder.build_state_specific_network(scenario)
+        nx_mod = _require_networkx()
 
-        degree = nx.degree_centrality(graph)
-        betweenness = nx.betweenness_centrality(graph, normalized=True)
+        degree = nx_mod.degree_centrality(graph)
+        betweenness = nx_mod.betweenness_centrality(graph, normalized=True)
         try:
-            eigen = nx.eigenvector_centrality(graph, weight="abs_weight", max_iter=1000)
-        except Exception:
+            eigen = nx_mod.eigenvector_centrality(graph, weight="abs_weight", max_iter=1000)
+        except nx_mod.NetworkXError:
             eigen = {n: 0.0 for n in graph.nodes()}
 
         results: Dict[str, Dict[str, float]] = {}
@@ -357,7 +453,11 @@ class NetworkAnalyzer:
         target: str,
         max_length: int = 3,
         scenario: Optional[Scenario] = None,
-    ) -> List[List[str]]:
+        *,
+        max_paths: Optional[int] = None,
+        time_limit_s: Optional[float] = None,
+        return_metadata: bool = False,
+    ) -> Union[List[List[str]], Tuple[List[List[str]], Dict[str, Any]]]:
         """
         Find all impact pathways between two descriptors.
 
@@ -370,6 +470,9 @@ class NetworkAnalyzer:
             target: Target descriptor name.
             max_length: Maximum pathway length in edges (default: 3).
             scenario: Optional scenario for state-specific pathways.
+            max_paths: Optional cap on number of returned paths.
+            time_limit_s: Optional time limit in seconds for path enumeration.
+            return_metadata: If True, return `(paths, metadata)`.
 
         Returns:
             List of pathways, each as a list of descriptor names, sorted by
@@ -384,14 +487,43 @@ class NetworkAnalyzer:
             raise ValueError(f"Target descriptor '{target}' not found")
         if max_length < 1:
             raise ValueError("max_length must be at least 1")
+        if max_paths is not None and int(max_paths) <= 0:
+            raise ValueError("max_paths must be positive when provided")
+        if time_limit_s is not None and float(time_limit_s) < 0.0:
+            raise ValueError("time_limit_s must be non-negative when provided")
         if source == target:
-            return []
+            paths: List[List[str]] = []
+            if not return_metadata:
+                return paths
+            meta = PathwaySearchMetadata(
+                is_complete=True,
+                truncated_by_max_paths=False,
+                truncated_by_time_limit=False,
+                enumerated_paths=0,
+                returned_paths=0,
+                max_paths=None if max_paths is None else int(max_paths),
+                time_limit_s=None if time_limit_s is None else float(time_limit_s),
+                elapsed_s=0.0,
+            )
+            return paths, meta.to_dict()
 
         graph = self._builder.build_state_specific_network(scenario)
-        if not nx.has_path(graph, source, target):
-            return []
-
-        paths = list(nx.all_simple_paths(graph, source=source, target=target, cutoff=max_length))
+        nx_mod = _require_networkx()
+        if not nx_mod.has_path(graph, source, target):
+            paths = []
+            if not return_metadata:
+                return paths
+            meta = PathwaySearchMetadata(
+                is_complete=True,
+                truncated_by_max_paths=False,
+                truncated_by_time_limit=False,
+                enumerated_paths=0,
+                returned_paths=0,
+                max_paths=None if max_paths is None else int(max_paths),
+                time_limit_s=None if time_limit_s is None else float(time_limit_s),
+                elapsed_s=0.0,
+            )
+            return paths, meta.to_dict()
 
         def _path_strength(path: Sequence[str]) -> float:
             strength = 0.0
@@ -399,8 +531,15 @@ class NetworkAnalyzer:
                 strength += float(graph.edges[u, v].get("abs_weight", 0.0))
             return strength
 
-        paths.sort(key=_path_strength, reverse=True)
-        return [list(map(str, p)) for p in paths]
+        paths, meta = _collect_ranked_paths_bounded(
+            path_iter=nx_mod.all_simple_paths(graph, source=source, target=target, cutoff=max_length),
+            path_strength_fn=_path_strength,
+            max_paths=max_paths,
+            time_limit_s=time_limit_s,
+        )
+        if return_metadata:
+            return paths, meta.to_dict()
+        return paths
 
     def compute_network_metrics(
         self, scenario: Optional[Scenario] = None
@@ -415,20 +554,21 @@ class NetworkAnalyzer:
             Dictionary of network metrics.
         """
         graph = self._builder.build_state_specific_network(scenario)
+        nx_mod = _require_networkx()
         undirected = graph.to_undirected()
 
         metrics: Dict[str, float] = {
             "n_nodes": float(graph.number_of_nodes()),
             "n_edges": float(graph.number_of_edges()),
-            "density": float(nx.density(graph)),
+            "density": float(nx_mod.density(graph)),
         }
 
         components = list(nx.connected_components(undirected))
         metrics["n_components"] = float(len(components))
 
         try:
-            metrics["avg_clustering"] = float(nx.average_clustering(undirected))
-        except Exception:
+            metrics["avg_clustering"] = float(nx_mod.average_clustering(undirected))
+        except (nx_mod.NetworkXError, ZeroDivisionError):
             metrics["avg_clustering"] = 0.0
 
         largest: Optional[Iterable[str]] = None
@@ -437,8 +577,10 @@ class NetworkAnalyzer:
         if largest is not None and len(list(largest)) >= 2:
             sub = undirected.subgraph(largest).copy()
             try:
-                metrics["avg_shortest_path_length"] = float(nx.average_shortest_path_length(sub))
-            except Exception:
+                metrics["avg_shortest_path_length"] = float(
+                    nx_mod.average_shortest_path_length(sub)
+                )
+            except nx_mod.NetworkXError:
                 metrics["avg_shortest_path_length"] = 0.0
         else:
             metrics["avg_shortest_path_length"] = 0.0
@@ -461,8 +603,11 @@ class NetworkAnalyzer:
             Dictionary mapping descriptor names to community IDs (integers).
         """
         graph = self._builder.build_state_specific_network(scenario)
+        nx_mod = _require_networkx()
         undirected = graph.to_undirected()
-        communities = nx.community.louvain_communities(undirected, resolution=float(resolution))
+        communities = nx_mod.community.louvain_communities(
+            undirected, resolution=float(resolution)
+        )
 
         result: Dict[str, int] = {}
         for idx, comm in enumerate(communities):
@@ -509,10 +654,10 @@ class ImpactPathwayAnalyzer:
 
     def __init__(self, matrix: CIBMatrix) -> None:
         """
-        Initialize pathway analyzer with a CIB matrix.
+        The pathway analyser is initialised with a CIB matrix.
 
         Args:
-            matrix: CIB matrix to analyze.
+            matrix: CIB matrix to analyse.
         """
         self.matrix = matrix
 
@@ -614,7 +759,10 @@ class ImpactPathwayAnalyzer:
         max_length: int = 3,
         aggregation: str = "mean_absolute",
         min_abs_weight: float = 0.0,
-    ) -> List[Tuple[List[str], float]]:
+        max_paths: Optional[int] = None,
+        time_limit_s: Optional[float] = None,
+        return_metadata: bool = False,
+    ) -> Union[List[Tuple[List[str], float]], Tuple[List[Tuple[List[str], float]], Dict[str, Any]]]:
         """
         Find the strongest impact pathways in the network.
 
@@ -628,6 +776,9 @@ class ImpactPathwayAnalyzer:
             max_length: Maximum pathway length in edges (default: 3).
             aggregation: Aggregation method when scenario is None.
             min_abs_weight: Do not include edges with abs_weight below this threshold.
+            max_paths: Optional cap on number of returned pathways.
+            time_limit_s: Optional time limit in seconds for path enumeration.
+            return_metadata: If True, return `(pathways, metadata)`.
 
         Returns:
             List of (pathway, strength) tuples, sorted by strength.
@@ -636,6 +787,10 @@ class ImpactPathwayAnalyzer:
             raise ValueError("n must be positive")
         if max_length < 1:
             raise ValueError("max_length must be at least 1")
+        if max_paths is not None and int(max_paths) <= 0:
+            raise ValueError("max_paths must be positive when provided")
+        if time_limit_s is not None and float(time_limit_s) < 0.0:
+            raise ValueError("time_limit_s must be non-negative when provided")
 
         builder = NetworkGraphBuilder(self.matrix)
         graph = builder.build_state_specific_network(
@@ -643,12 +798,24 @@ class ImpactPathwayAnalyzer:
             min_abs_weight=min_abs_weight,
             aggregation=aggregation,
         )
+        nx_mod = _require_networkx()
 
         nodes = list(graph.nodes())
         if len(nodes) < 2 or graph.number_of_edges() == 0:
-            return []
-
-        candidates: List[Tuple[List[str], float]] = []
+            out: List[Tuple[List[str], float]] = []
+            if not return_metadata:
+                return out
+            meta = PathwaySearchMetadata(
+                is_complete=True,
+                truncated_by_max_paths=False,
+                truncated_by_time_limit=False,
+                enumerated_paths=0,
+                returned_paths=0,
+                max_paths=None if max_paths is None else int(max_paths),
+                time_limit_s=None if time_limit_s is None else float(time_limit_s),
+                elapsed_s=0.0,
+            )
+            return out, meta.to_dict()
 
         def _path_strength(path: Sequence[str]) -> float:
             s = 0.0
@@ -656,13 +823,33 @@ class ImpactPathwayAnalyzer:
                 s += float(graph.edges[u, v].get("abs_weight", 0.0))
             return s
 
-        for i, src in enumerate(nodes):
-            for tgt in nodes[i + 1 :]:
-                if not nx.has_path(graph, src, tgt):
-                    continue
-                for p in nx.all_simple_paths(graph, source=src, target=tgt, cutoff=int(max_length)):
-                    candidates.append((list(map(str, p)), _path_strength(p)))
+        def _path_generator() -> Iterable[Sequence[str]]:
+            for i, src in enumerate(nodes):
+                for tgt in nodes[i + 1 :]:
+                    if not nx_mod.has_path(graph, src, tgt):
+                        continue
+                    yield from nx_mod.all_simple_paths(
+                        graph, source=src, target=tgt, cutoff=int(max_length)
+                    )
 
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        return candidates[: int(n)]
+        ranked_paths, meta = _collect_ranked_paths_bounded(
+            path_iter=_path_generator(),
+            path_strength_fn=_path_strength,
+            max_paths=max_paths,
+            time_limit_s=time_limit_s,
+        )
+        candidates = [(p, _path_strength(p)) for p in ranked_paths[: int(n)]]
+        meta_out = PathwaySearchMetadata(
+            is_complete=meta.is_complete,
+            truncated_by_max_paths=meta.truncated_by_max_paths,
+            truncated_by_time_limit=meta.truncated_by_time_limit,
+            enumerated_paths=meta.enumerated_paths,
+            returned_paths=len(candidates),
+            max_paths=meta.max_paths,
+            time_limit_s=meta.time_limit_s,
+            elapsed_s=meta.elapsed_s,
+        )
+        if return_metadata:
+            return candidates, meta_out.to_dict()
+        return candidates
 

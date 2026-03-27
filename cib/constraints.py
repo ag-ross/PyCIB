@@ -126,7 +126,7 @@ class ConstraintIndex:
         def _state_idx(d_idx: int, label: str) -> int:
             try:
                 return int(state_to_idx[d_idx][label])
-            except Exception as e:  # noqa: BLE001
+            except KeyError as e:
                 d = descriptors[d_idx]
                 raise ValueError(
                     f"Unknown state {label!r} for descriptor {d!r} in constraints"
@@ -168,7 +168,7 @@ class ConstraintIndex:
             else:
                 raise ValueError(f"Unknown constraint spec type: {type(spec)!r}")
 
-        # Validate that no descriptor is rendered infeasible by AllowedStates.
+        # It is validated that no descriptor is rendered infeasible by AllowedStates.
         for d, mask in enumerate(allowed_masks):
             if not bool(mask.any()):
                 raise ValueError(

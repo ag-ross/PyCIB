@@ -95,7 +95,7 @@ class GaussianCIBMatrix(CIBMatrix):
             self.set_impact(key[0], key[1], key[2], key[3], float(value), sigma=sigma)
 
     def get_sigma(self, key: ImpactKey) -> float:
-        """Get sigma for an impact cell key."""
+        """Sigma for an impact cell key is returned."""
         return float(self._sigma.get(key, self.default_sigma))
 
     def sample_matrix(self, seed: int) -> CIBMatrix:

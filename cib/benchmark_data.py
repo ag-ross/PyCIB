@@ -81,7 +81,7 @@ def benchmark_specs() -> Sequence[BenchmarkSpec]:
 
 def make_benchmark_matrix(spec: BenchmarkSpec) -> CIBMatrix:
     """
-    Create a deterministic benchmark matrix according to a specification.
+    A deterministic benchmark matrix is created according to a specification.
     """
     desc = _make_uniform_descriptors(
         n_descriptors=int(spec.n_descriptors), n_states=int(spec.n_states)

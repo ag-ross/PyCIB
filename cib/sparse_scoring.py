@@ -115,6 +115,14 @@ class SparseCIBScorer:
             raise ValueError(
                 f"z_idx must have shape ({n_desc},), but shape {tuple(z.shape)} was provided"
             )
+        for j in range(n_desc):
+            idx = int(z[j])
+            max_idx = int(self.state_counts[j]) - 1
+            if idx < 0 or idx > max_idx:
+                raise ValueError(
+                    f"State index {idx} out of range [0, {max_idx}] for descriptor "
+                    f"'{self.descriptors[j]}'"
+                )
 
         scores = np.zeros((n_desc, int(self.max_states)), dtype=np.float64)
         for i in range(n_desc):
@@ -139,6 +147,22 @@ class SparseCIBScorer:
         j = int(changed_descriptor_idx)
         old = int(old_state_idx)
         new = int(new_state_idx)
+        n_desc = int(len(self.descriptors))
+        if j < 0 or j >= n_desc:
+            raise ValueError(
+                f"changed_descriptor_idx {j} out of range [0, {n_desc - 1}]"
+            )
+        max_idx = int(self.state_counts[j]) - 1
+        if old < 0 or old > max_idx:
+            raise ValueError(
+                f"old_state_idx {old} out of range [0, {max_idx}] for descriptor "
+                f"'{self.descriptors[j]}'"
+            )
+        if new < 0 or new > max_idx:
+            raise ValueError(
+                f"new_state_idx {new} out of range [0, {max_idx}] for descriptor "
+                f"'{self.descriptors[j]}'"
+            )
 
         old_flat = int(self.offsets[j] + old)
         td = self.row_tgt_desc[old_flat]

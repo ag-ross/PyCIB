@@ -109,7 +109,7 @@ class ShockModel:
 
     def __init__(self, base_matrix: CIBMatrix) -> None:
         """
-        Initialize shock model with base matrix.
+        The shock model is initialised with the base matrix.
 
         Args:
             base_matrix: Original CIB matrix to apply shocks to.
@@ -434,6 +434,55 @@ class ShockAwareGlobalSuccession(SuccessionOperator):
         return Scenario(new_state_dict, matrix)
 
 
+class ShockAwareLocalSuccession(SuccessionOperator):
+    """
+    Local succession with additive dynamic shocks on impact balances.
+
+    Updates only the most inconsistent descriptor (largest gap between
+    current and best shocked impact score). Shocks are applied the same
+    way as in ShockAwareGlobalSuccession:
+      theta'[descriptor, state] = theta[descriptor, state] + eta
+    """
+
+    def __init__(self, shocks: Mapping[Tuple[str, str], float]) -> None:
+        self.shocks = {k: float(v) for k, v in shocks.items()}
+
+    def find_successor(self, scenario: Scenario, matrix: CIBMatrix) -> Scenario:
+        new_state_dict = dict(scenario.to_dict())
+        max_gap = float("-inf")
+        target_descriptor: Optional[str] = None
+        target_state: Optional[str] = None
+
+        for descriptor, states in matrix.descriptors.items():
+            current_state = scenario.get_state(descriptor)
+            current_score = matrix.calculate_impact_score(
+                scenario, descriptor, current_state
+            )
+            current_score += self.shocks.get((descriptor, current_state), 0.0)
+
+            best_state: Optional[str] = None
+            best_score = float("-inf")
+            for state in states:
+                score = matrix.calculate_impact_score(scenario, descriptor, state)
+                score += self.shocks.get((descriptor, state), 0.0)
+                if score > best_score:
+                    best_score = score
+                    best_state = state
+
+            if best_state is None:
+                raise ValueError(f"No states found for descriptor '{descriptor}'")
+            gap = best_score - current_score
+            if gap > max_gap:
+                max_gap = gap
+                target_descriptor = descriptor
+                target_state = best_state
+
+        if target_descriptor is not None and max_gap > 0 and target_state is not None:
+            new_state_dict[target_descriptor] = target_state
+
+        return Scenario(new_state_dict, matrix)
+
+
 class RobustnessTester:
     """
     Tests scenario robustness under structural shocks.
@@ -448,7 +497,7 @@ class RobustnessTester:
         shock_model: ShockModel,
     ) -> None:
         """
-        Initialize robustness tester.
+        The robustness tester is initialised.
 
         Args:
             matrix: Base CIB matrix (can be CIBMatrix or UncertainCIBMatrix).

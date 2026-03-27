@@ -33,10 +33,10 @@ CONFIDENCE_TO_SIGMA: Dict[int, float] = {5: 0.2, 4: 0.5, 3: 0.8, 2: 1.2, 1: 1.5}
 
 
 def sigma_from_confidence(c: int) -> float:
-    """Map confidence code (1..5) to sigma."""
+    """Confidence code (1..5) is mapped to sigma."""
     try:
         return CONFIDENCE_TO_SIGMA[int(c)]
-    except Exception as e:  # noqa: BLE001 - keep dependency-light
+    except (KeyError, TypeError, ValueError) as e:
         raise ValueError(
             f"Invalid confidence code {c!r}; expected one of {sorted(CONFIDENCE_TO_SIGMA)}"
         ) from e
@@ -58,7 +58,7 @@ def seeds_for_run(base_seed: int, m: int) -> Dict[str, int]:
 
 
 def clip_impact(x: float, lo: float = -3.0, hi: float = +3.0) -> float:
-    """Clip to the conventional CIB impact range."""
+    """Values are clipped to the conventional CIB impact range."""
     return float(np.clip(x, lo, hi))
 
 
@@ -295,7 +295,7 @@ def _vec_for_source_state_ordered(
     Semantics: "up" means positive association (low->low, high->high), "down" means
     negative association (low->high, high->low).
 
-    The output is centered (sums approximately to 0) and scaled so that the maximum
+    The output is centred (sums approximately to 0) and scaled so that the maximum
     absolute value is approximately `strength` (clipped to [0..2] for consistency
     with the compact workshop spec).
     """
@@ -1223,7 +1223,7 @@ def _save_cim_to_text_file(
         results_dir = package_dir / "results"
         results_dir.mkdir(exist_ok=True)
         output_file = results_dir / output_path
-    except Exception:
+    except (ImportError, OSError, AttributeError):
         # Fallback: current directory is used.
         output_file = Path(output_path)
     
@@ -1231,7 +1231,7 @@ def _save_cim_to_text_file(
     try:
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write('\n'.join(output_lines))
-    except Exception:  # noqa: BLE001 - keep dependency-light
+    except OSError:
         pass
 
 
@@ -1290,14 +1290,14 @@ def _save_scenario_scoring_to_file(
         results_dir = package_dir / "results"
         results_dir.mkdir(exist_ok=True)
         output_file = results_dir / output_path
-    except Exception:
+    except (ImportError, OSError, AttributeError):
         output_file = Path(output_path)
 
     # Output is written to file (silently fails if file cannot be written, e.g., read-only filesystem).
     try:
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write('\n'.join(output_lines))
-    except Exception:  # noqa: BLE001 - keep dependency-light
+    except OSError:
         pass
 
 

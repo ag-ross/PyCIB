@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple, TYPE_CHECKING
 
-import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt
 
 from cib.core import CIBMatrix, Scenario
 
@@ -92,7 +92,7 @@ class MatrixVisualizer:
         matrix: CIBMatrix, ax: Optional[plt.Axes] = None
     ) -> plt.Axes:
         """
-        Create a heatmap visualization of the matrix.
+        A heatmap visualisation of the matrix is created.
 
         For matrices with multiple descriptor pairs, this plots the first
         available pair. Use plot_matrix for specific pairs.
@@ -183,7 +183,7 @@ class ScenarioVisualizer:
         label_counts: bool = False,
     ) -> plt.Axes:
         """
-        Create a network graph of scenario relationships using NetworkX.
+        A network graph of scenario relationships is created using NetworkX.
 
         Edge creation rules:
         - If show_transitions is True and a succession_operator is provided, add
@@ -318,7 +318,7 @@ class ScenarioVisualizer:
                 from networkx.drawing.nx_agraph import graphviz_layout
 
                 pos = graphviz_layout(graph, prog="dot")
-            except Exception:
+            except (ImportError, ModuleNotFoundError, OSError, RuntimeError):
                 pos = nx.spring_layout(graph, seed=42, k=1.0, iterations=50)
         else:
             pos = nx.spring_layout(graph, seed=42, k=1.0, iterations=50)
@@ -399,7 +399,13 @@ class ScenarioVisualizer:
         Returns:
             Matplotlib axes object.
         """
-        import networkx as nx
+        try:
+            import networkx as nx
+        except ImportError as exc:  # pragma: no cover
+            raise ImportError(
+                "Transformation graph visualization requires networkx. "
+                "Install with: pip install pycib[network]"
+            ) from exc
 
         if ax is None:
             _, ax = plt.subplots(figsize=(10, 8))
@@ -459,7 +465,7 @@ class ScenarioVisualizer:
                 from networkx.drawing.nx_agraph import graphviz_layout
 
                 pos = graphviz_layout(graph, prog="dot")
-            except Exception:
+            except (ImportError, ModuleNotFoundError, OSError, RuntimeError):
                 pos = nx.spring_layout(graph, seed=42, k=1.0, iterations=50)
         else:
             pos = nx.spring_layout(graph, seed=42, k=1.0, iterations=50)
@@ -601,7 +607,7 @@ class DynamicVisualizer:
         order_by_probability: bool = True,
     ) -> plt.Axes:
         """
-        Plot stacked probability bands P(z_i(t)=k) over time for one descriptor.
+        Plot stacked ensemble-share bands P(z_i(t)=k) over time for one descriptor.
         """
         if ax is None:
             _, ax = plt.subplots(figsize=(10, 4))
@@ -642,8 +648,8 @@ class DynamicVisualizer:
         ax.set_ylim(0.0, 1.0)
         ax.set_xticks(periods)
         ax.set_xlabel("Period")
-        ax.set_ylabel("Probability")
-        ax.set_title(title or f"State probabilities over time: {descriptor}")
+        ax.set_ylabel("Ensemble share")
+        ax.set_title(title or f"State ensemble shares over time: {descriptor}")
         ax.legend(loc="upper right", ncols=min(3, len(all_states)))
         return ax
 
@@ -697,7 +703,7 @@ class DynamicVisualizer:
         """
         Plot categorical + numeric summaries, optionally with a spaghetti subplot.
 
-        Top: stacked categorical probability bands.
+        Top: stacked categorical ensemble-share bands.
         Bottom: expected value main line with quantile confidence band.
         Optional third: step-style per-run traces for the descriptor.
         """
@@ -714,7 +720,7 @@ class DynamicVisualizer:
             if title:
                 fig.suptitle(title                )
 
-        # Categorical probability bands are plotted.
+        # Categorical ensemble-share bands are plotted.
         state_order: Optional[List[str]] = None
         if spaghetti_numeric_mapping is not None:
             # If the descriptor has an ordered numeric mapping, it is used to keep
@@ -724,13 +730,13 @@ class DynamicVisualizer:
                 state_order = [
                     s for s, _v in sorted(mapping.items(), key=lambda kv: kv[1])
                 ]
-            except Exception:
+            except (TypeError, ValueError):
                 state_order = None
         DynamicVisualizer.plot_state_probability_bands(
             timelines=timelines,
             descriptor=descriptor,
             ax=ax_probs,
-            title=f"State probability bands: {descriptor}",
+            title=f"State ensemble-share bands: {descriptor}",
             state_order=state_order,
         )
 
@@ -827,7 +833,7 @@ class DynamicVisualizer:
             timelines=timelines,
             descriptor=descriptor,
             ax=ax_probs,
-            title=f"State probability bands: {descriptor}",
+            title=f"State ensemble-share bands: {descriptor}",
             state_order=[s for s, _v in sorted({str(k): float(v) for k, v in numeric_mapping.items()}.items(), key=lambda kv: kv[1])],
         )
 
@@ -997,7 +1003,7 @@ class DynamicVisualizer:
         ax: Optional[plt.Axes] = None,
     ) -> plt.Axes:
         """
-        Create a network graph of scenario relationships.
+        A network graph of scenario relationships is created.
 
         For small systems, creates a graph showing scenario transitions.
         For larger systems, creates a simplified visualization.
@@ -1025,7 +1031,15 @@ class DynamicVisualizer:
                 edge_metric="hamming",
                 max_edges_per_node=5,
             )
-        except Exception:
+        except (
+            ImportError,
+            ModuleNotFoundError,
+            AttributeError,
+            ValueError,
+            TypeError,
+            OSError,
+            RuntimeError,
+        ):
             # The previous simplified visualization is preserved as a fallback.
             if ax is None:
                 _, ax = plt.subplots(figsize=(10, 8))

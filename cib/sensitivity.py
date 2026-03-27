@@ -192,7 +192,7 @@ def _ridge_fit_predict(X: np.ndarray, y: np.ndarray, *, alpha: float = 1e-6) -> 
         return np.full_like(y, float(np.mean(y)))
     try:
         beta = np.linalg.solve(A, b)
-    except Exception:
+    except np.linalg.LinAlgError:
         return np.full_like(y, float(np.mean(y)))
     if not np.all(np.isfinite(beta)):
         return np.full_like(y, float(np.mean(y)))
@@ -298,7 +298,7 @@ def _logistic_fit(
             return None
         try:
             delta = np.linalg.solve(aug, rhs)
-        except Exception:
+        except np.linalg.LinAlgError:
             return None
 
         step_int = float(delta[0])
@@ -685,7 +685,7 @@ def compute_global_sensitivity_dynamic(
             y_names = (str(oname),)
         else:
             y_oh, y_cols = _one_hot_columns(ovals, prefix=str(oname))
-            # For categorical outcomes, we analyze each one-vs-rest column separately.
+            # For categorical outcomes, each one-vs-rest column is analysed separately.
             # Each column is a binary label (0/1).
             for col_idx, col_name in enumerate(y_cols):
                 yy = y_oh[:, col_idx].astype(float)

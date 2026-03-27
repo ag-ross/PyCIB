@@ -68,7 +68,7 @@ class UncertainCIBMatrix(CIBMatrix):
         default_confidence: int = 3,
     ) -> None:
         """
-        Initialize uncertain CIB matrix.
+        The uncertain CIB matrix is initialised.
 
         Args:
             descriptors: Dictionary mapping descriptor names to state lists.
@@ -134,7 +134,7 @@ class UncertainCIBMatrix(CIBMatrix):
         default_confidence: Optional[int] = None,
     ) -> None:
         """
-        Set multiple impacts with optional confidence codes.
+        Multiple impacts are set with optional confidence codes.
 
         Args:
             impacts: Dictionary mapping (src_desc, src_state, tgt_desc,
@@ -163,7 +163,7 @@ class UncertainCIBMatrix(CIBMatrix):
         self, src_desc: str, src_state: str, tgt_desc: str, tgt_state: str
     ) -> int:
         """
-        Get confidence code for an impact.
+        The confidence code for an impact is returned.
 
         Args:
             src_desc: Source descriptor name.
