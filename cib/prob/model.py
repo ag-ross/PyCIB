@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Sequence, Tuple, Union
 
@@ -11,6 +12,7 @@ from cib.prob.constraints import (
     multiplier_normalization_issues,
     multiplier_pairwise_targets,
     pairwise_target_frechet_violations,
+    validate_multipliers,
     validate_marginals,
 )
 from cib.prob.approx import ApproxJointDistribution
@@ -33,10 +35,18 @@ class JointDistribution:
     fit_report: Optional[FitReport] = None
 
     def __post_init__(self) -> None:
+        tol = 1e-8
         if self.p.ndim != 1:
             raise ValueError("p must be 1D")
         if int(self.p.shape[0]) != int(self.index.size):
             raise ValueError("p has wrong length")
+        if not np.all(np.isfinite(self.p)):
+            raise ValueError("p must contain only finite values")
+        if np.any(self.p < -float(tol)):
+            raise ValueError("p must be non-negative within tolerance")
+        mass = float(np.sum(self.p))
+        if not np.isfinite(mass) or not np.isclose(mass, 1.0, atol=tol, rtol=0.0):
+            raise ValueError("p must sum to 1 within tolerance")
 
     def scenario_prob(self, assignment: AssignmentLike) -> float:
         return float(self.p[self.index.index_of(assignment)])
@@ -97,13 +107,14 @@ class ProbabilisticCIAModel:
             raise ValueError("factors cannot be empty")
         self.factors = tuple(factors)
         self.index = ScenarioIndex(self.factors)
-        self.marginals: Marginals = marginals
-        self.multipliers: Multipliers = multipliers or {}
+        self.marginals: Marginals = copy.deepcopy(marginals)
+        self.multipliers: Multipliers = copy.deepcopy(multipliers) if multipliers is not None else {}
         self.feasibility_mode = str(feasibility_mode).strip().lower()
         self.feasibility_tol = float(feasibility_tol)
         self.enforce_multiplier_normalisation = bool(enforce_multiplier_normalisation)
 
         validate_marginals(self.factors, self.marginals)
+        validate_multipliers(self.factors, self.multipliers, require_positive=True)
         if self.feasibility_mode not in {"strict", "repair"}:
             raise ValueError(f"Unknown feasibility_mode: {self.feasibility_mode!r}")
 
@@ -165,7 +176,7 @@ class ProbabilisticCIAModel:
             for (i_a, j_b), _m in self.multipliers.items():
                 (i, _a) = i_a
                 (j, _b) = j_b
-                rel_map[(str(i), str(j))] = float(
+                weight = float(
                     relevance_weight(
                         child=str(i),
                         parent=str(j),
@@ -173,6 +184,12 @@ class ProbabilisticCIAModel:
                         default_weight=float(relevance_default_weight),
                     )
                 )
+                if not np.isfinite(weight) or float(weight) < 0.0:
+                    raise ValueError(
+                        "Relevance weights must be finite and non-negative: "
+                        f"got {weight!r} for edge ({str(i)!r} <- {str(j)!r})"
+                    )
+                rel_map[(str(i), str(j))] = float(weight)
 
         if method == "iterative":
             if with_report:

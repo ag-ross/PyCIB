@@ -21,6 +21,13 @@ class DynamicProbabilisticCIA:
     periods: Sequence[int]
     models_by_period: Mapping[int, ProbabilisticCIAModel]
 
+    @staticmethod
+    def _index_signature(dist: JointDistribution) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        return tuple(
+            (str(factor.name), tuple(str(outcome) for outcome in factor.outcomes))
+            for factor in dist.index.factors
+        )
+
     def fit_distributions(
         self,
         *,
@@ -53,6 +60,17 @@ class DynamicProbabilisticCIA:
                 out[int(t)] = model.fit_joint(**fit_opts)
                 prev = out[int(t)]
                 continue
+
+            current_signature = tuple(
+                (str(factor.name), tuple(str(outcome) for outcome in factor.outcomes))
+                for factor in model.index.factors
+            )
+            previous_signature = self._index_signature(prev)
+            if current_signature != previous_signature:
+                raise ValueError(
+                    "Predict-update KL baseline is incompatible with the current period "
+                    "factor space (factor names/order/outcomes differ)"
+                )
 
             opts = dict(fit_opts)
             opts["kl_baseline"] = prev.p

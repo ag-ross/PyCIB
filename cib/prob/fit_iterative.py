@@ -6,7 +6,12 @@ from typing import Dict, Mapping, Optional, Sequence, Tuple, Union
 import numpy as np
 
 from cib.prob.approx import ApproxJointDistribution
-from cib.prob.constraints import Marginals, Multipliers, validate_marginals
+from cib.prob.constraints import (
+    Marginals,
+    Multipliers,
+    validate_marginals,
+    validate_multipliers,
+)
 from cib.prob.fit_report import FitReport
 from cib.prob.types import FactorSpec, ScenarioIndex
 
@@ -43,12 +48,23 @@ def fit_joint_iterative(
     """
     multipliers = multipliers or {}
     validate_marginals(index.factors, marginals)
+    validate_multipliers(index.factors, multipliers, require_positive=True)
     burn_in_sweeps = int(burn_in_sweeps)
     n_samples = int(n_samples)
     thinning = int(thinning)
     eps = float(eps)
+    if burn_in_sweeps < 0:
+        raise ValueError(
+            f"burn_in_sweeps must be >= 0 (got {burn_in_sweeps})"
+        )
+    if n_samples < 1:
+        raise ValueError(f"n_samples must be >= 1 (got {n_samples})")
+    if thinning < 1:
+        raise ValueError(f"thinning must be >= 1 (got {thinning})")
+    if eps <= 0.0:
+        raise ValueError(f"eps must be > 0 (got {eps})")
 
-    rng = np.random.default_rng(int(random_seed) if random_seed is not None else 0)
+    rng = np.random.default_rng(None if random_seed is None else int(random_seed))
 
     n_factors = len(index.factors)
     outcomes_by_factor = [list(f.outcomes) for f in index.factors]
@@ -85,14 +101,8 @@ def fit_joint_iterative(
         vec = contrib.get((i_pos, j_pos, b_name))
         if vec is None:
             vec = np.zeros(n_outcomes[i_pos], dtype=float)
-        try:
-            a_idx = outcomes_by_factor[i_pos].index(str(a_name))
-        except ValueError:
-            continue
+        a_idx = outcomes_by_factor[i_pos].index(str(a_name))
         m = float(m)
-        if m <= 0.0:
-            # Non-positive multipliers are treated as invalid and are ignored here.
-            continue
         vec[a_idx] = vec[a_idx] + w * float(np.log(m))
         contrib[(i_pos, j_pos, b_name)] = vec
 

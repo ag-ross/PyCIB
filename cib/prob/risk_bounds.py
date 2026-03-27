@@ -13,6 +13,7 @@ from cib.prob.constraints import (
     pairwise_target_frechet_violations,
     project_pairwise_targets_to_frechet_bounds,
     validate_marginals,
+    validate_multipliers,
 )
 from cib.prob.types import AssignmentLike, FactorSpec, ScenarioIndex
 
@@ -71,6 +72,13 @@ def _event_indicator(index: ScenarioIndex, event: Mapping[str, str]) -> np.ndarr
         if k not in index.factor_names:
             raise ValueError(f"Unknown factor in event specification: {k!r}")
     pos_by_name = {n: i for i, n in enumerate(index.factor_names)}
+    for fname, outcome in event.items():
+        pos = pos_by_name[fname]
+        allowed = set(index.factors[pos].outcomes)
+        if outcome not in allowed:
+            raise ValueError(
+                f"Unknown outcome {outcome!r} for event factor {fname!r}"
+            )
 
     ind = np.zeros(index.size, dtype=float)
     for idx in range(index.size):
@@ -119,6 +127,7 @@ def event_probability_bounds(
         )
 
     validate_marginals(index.factors, marginals)
+    validate_multipliers(index.factors, multipliers, require_positive=True)
     C, d = _build_marginal_constraints(index, marginals)
 
     A_eq = C

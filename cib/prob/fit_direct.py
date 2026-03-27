@@ -13,9 +13,33 @@ from cib.prob.constraints import (
     pairwise_target_frechet_violations,
     project_pairwise_targets_to_frechet_bounds,
     validate_marginals,
+    validate_multipliers,
 )
 from cib.prob.fit_report import FitReport
 from cib.prob.types import ScenarioIndex
+
+
+def _normalized_kl_baseline(
+    index: ScenarioIndex,
+    marginals: Marginals,
+    kl_baseline: Optional[np.ndarray],
+    kl_baseline_eps: float,
+) -> np.ndarray:
+    if kl_baseline is None:
+        q = _product_baseline(index, marginals)
+    else:
+        q = np.asarray(kl_baseline, dtype=float)
+        if q.ndim != 1 or int(q.shape[0]) != int(index.size):
+            raise ValueError("KL baseline has wrong shape")
+        if float(kl_baseline_eps) > 0.0:
+            q = np.maximum(q, float(kl_baseline_eps))
+        qs = float(np.sum(q))
+        if qs <= 0.0:
+            raise ValueError("KL baseline is degenerate (sum <= 0)")
+        q = q / qs
+    if np.any(q <= 0.0):
+        raise ValueError("KL baseline has zeros; cannot use KL regularisation")
+    return q
 
 
 def _product_baseline(index: ScenarioIndex, marginals: Marginals) -> np.ndarray:
@@ -124,9 +148,11 @@ def fit_joint_direct(
     """
     multipliers = multipliers or {}
     validate_marginals(index.factors, marginals)
+    validate_multipliers(index.factors, multipliers, require_positive=True)
 
-    # Fast path: if there are no multiplier constraints, the independent baseline implied by marginals is already a valid joint distribution.
-    if not multipliers:
+    # Fast path: if there are no multiplier constraints and no KL regularisation,
+    # the independent baseline implied by marginals is already a valid solution.
+    if not multipliers and float(kl_weight) <= 0.0:
         p = _product_baseline(index, marginals)
         if not return_report:
             return p
@@ -135,29 +161,7 @@ def fit_joint_direct(
         lin_res = C @ p - d
         max_abs_marg_res = float(np.max(np.abs(lin_res))) if lin_res.size else 0.0
 
-        kl_weight = float(kl_weight)
-        use_kl = kl_weight > 0.0
-        if use_kl:
-            if kl_baseline is None:
-                q = _product_baseline(index, marginals)
-            else:
-                q = np.asarray(kl_baseline, dtype=float)
-                if q.ndim != 1 or int(q.shape[0]) != int(index.size):
-                    raise ValueError("KL baseline has wrong shape")
-                if float(kl_baseline_eps) > 0.0:
-                    q = np.maximum(q, float(kl_baseline_eps))
-                qs = float(np.sum(q))
-                if qs <= 0.0:
-                    raise ValueError("KL baseline is degenerate (sum <= 0)")
-                q = q / qs
-            if np.any(q <= 0.0):
-                raise ValueError("KL baseline has zeros; cannot use KL regularisation")
-            with np.errstate(divide="ignore", over="ignore", invalid="ignore", under="ignore"):
-                kl_val = float(np.sum(p * (np.log(p) - np.log(q))))
-            if not np.isfinite(kl_val):
-                kl_val = float("nan")
-        else:
-            kl_val = 0.0
+        kl_val = 0.0
 
         report = FitReport(
             method="direct",
@@ -208,6 +212,10 @@ def fit_joint_direct(
     if relevance_weights is not None and len(w) > 0:
         # Directed relevance weights are applied at the factor-pair level.
         rw = np.array([float(relevance_weights.get((i, j), 1.0)) for (i, _a, j, _b) in keys], dtype=float)
+        if not np.all(np.isfinite(rw)):
+            raise ValueError("Relevance weights must be finite")
+        if np.any(rw < 0.0):
+            raise ValueError("Relevance weights must be non-negative")
         w = w * rw
 
     C, d = _build_linear_constraints(index, marginals)
@@ -216,36 +224,30 @@ def fit_joint_direct(
     kl_weight = float(kl_weight)
     use_kl = kl_weight > 0.0
     if use_kl:
-        if kl_baseline is None:
-            q = _product_baseline(index, marginals)
-        else:
-            q = np.asarray(kl_baseline, dtype=float)
-            if q.ndim != 1 or int(q.shape[0]) != int(index.size):
-                raise ValueError("KL baseline has wrong shape")
-            if float(kl_baseline_eps) > 0.0:
-                q = np.maximum(q, float(kl_baseline_eps))
-            qs = float(np.sum(q))
-            if qs <= 0.0:
-                raise ValueError("KL baseline is degenerate (sum <= 0)")
-            q = q / qs
-        if np.any(q <= 0.0):
-            raise ValueError("KL baseline has zeros; cannot use KL regularisation")
+        q = _normalized_kl_baseline(index, marginals, kl_baseline, float(kl_baseline_eps))
         eps = 1e-12
         bounds = Bounds(eps * np.ones(index.size), np.ones(index.size))
     else:
         q = np.ones(index.size, dtype=float) / float(index.size)
         bounds = Bounds(np.zeros(index.size), np.ones(index.size))
 
-    rng = np.random.default_rng(int(random_seed) if random_seed is not None else 0)
+    rng = np.random.default_rng(
+        int(random_seed) if random_seed is not None else None
+    )
 
-    # Feasible initialization: baseline q generally matches marginals by construction.
+    # Feasible initialisation: baseline q generally matches marginals by construction.
     # The product of marginals is used so marginals match exactly; sum-to-one is also satisfied.
     x0 = _product_baseline(index, marginals)
-    if not use_kl:
-        # A small random perturbation is applied to help trust-constr avoid some degenerate Hessians.
-        noise = rng.normal(scale=1e-6, size=index.size)
+    # A small random perturbation is applied to avoid deterministic tie-breaking and
+    # help trust-constr avoid some degenerate Hessians. With explicit integer seeds,
+    # this remains reproducible; with random_seed=None, this is nondeterministic.
+    noise = rng.normal(scale=1e-6, size=index.size)
+    if use_kl:
+        eps = 1e-12
+        x0 = np.clip(x0 + noise, eps, None)
+    else:
         x0 = np.clip(x0 + noise, 0.0, None)
-        x0 = x0 / float(np.sum(x0))
+    x0 = x0 / float(np.sum(x0))
 
     w = np.asarray(w, dtype=float)
     t = np.asarray(t, dtype=float)

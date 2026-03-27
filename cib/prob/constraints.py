@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Iterable, Mapping, Optional, Tuple
 
+import numpy as np
+
 from cib.prob.types import FactorSpec
 from cib.prob.fit_report import FeasibilityAdjustment
 
@@ -14,7 +16,7 @@ Multipliers = Mapping[MultiplierKey, float]
 
 def validate_marginals(factors: Iterable[FactorSpec], marginals: Marginals, *, tol: float = 1e-9) -> None:
     """
-    Validate that marginals cover all factors/outcomes and sum to 1 per factor.
+    It is validated that marginals cover all factors/outcomes and sum to 1 per factor.
     """
     tol = float(tol)
     for f in factors:
@@ -25,11 +27,65 @@ def validate_marginals(factors: Iterable[FactorSpec], marginals: Marginals, *, t
         if missing:
             raise ValueError(f"Missing marginal outcomes for factor {f.name!r}: {missing!r}")
         vals = [float(probs[o]) for o in f.outcomes]
+        if not all(np.isfinite(v) for v in vals):
+            raise ValueError(
+                f"Non-finite marginal probability detected for factor {f.name!r}"
+            )
         if any(v < -tol for v in vals):
             raise ValueError(f"Negative marginal probability for factor {f.name!r}")
         s = sum(vals)
+        if not np.isfinite(float(s)):
+            raise ValueError(
+                f"Non-finite marginal total detected for factor {f.name!r}"
+            )
         if abs(s - 1.0) > tol:
             raise ValueError(f"Marginals for factor {f.name!r} must sum to 1 (got {s})")
+
+
+def validate_multipliers(
+    factors: Iterable[FactorSpec],
+    multipliers: Multipliers,
+    *,
+    require_positive: bool = True,
+) -> None:
+    """
+    Validate multiplier key/value semantics against the factor space.
+    """
+    outcomes_by_factor = {str(f.name): set(str(o) for o in f.outcomes) for f in factors}
+    for raw_key, raw_value in multipliers.items():
+        try:
+            (i_name, a_name), (j_name, b_name) = raw_key
+        except Exception as exc:  # pragma: no cover - defensive shape validation
+            raise ValueError(
+                "Invalid multiplier key shape; expected ((i, a), (j, b))"
+            ) from exc
+        i = str(i_name)
+        a = str(a_name)
+        j = str(j_name)
+        b = str(b_name)
+
+        if i not in outcomes_by_factor:
+            raise ValueError(f"Unknown multiplier factor: {i!r}")
+        if j not in outcomes_by_factor:
+            raise ValueError(f"Unknown multiplier factor: {j!r}")
+        if a not in outcomes_by_factor[i]:
+            raise ValueError(
+                f"Unknown multiplier outcome {a!r} for factor {i!r}"
+            )
+        if b not in outcomes_by_factor[j]:
+            raise ValueError(
+                f"Unknown multiplier outcome {b!r} for factor {j!r}"
+            )
+
+        value = float(raw_value)
+        if not np.isfinite(value):
+            raise ValueError(
+                f"Non-finite multiplier value for (({i!r}, {a!r}), ({j!r}, {b!r}))"
+            )
+        if require_positive and value <= 0.0:
+            raise ValueError(
+                f"Multiplier must be strictly positive for (({i!r}, {a!r}), ({j!r}, {b!r}))"
+            )
 
 
 def frechet_bounds(pi: float, pj: float) -> Tuple[float, float]:
@@ -59,11 +115,11 @@ def multiplier_normalization_issues(
     tol: float = 1e-6,
 ) -> list[MultiplierFeasibilityIssue]:
     """
-    Check the implied normalization constraint:
+    The implied normalisation constraint is checked:
 
       For fixed (i, j=b): sum_a m_{(i=a)<-(j=b)} * P(i=a) = 1
 
-    Only checks contexts where multipliers are provided for *all* outcomes of i.
+    Only contexts where multipliers are provided for *all* outcomes of i are checked.
     """
     tol = float(tol)
     outcomes_by_factor = {f.name: list(f.outcomes) for f in factors}
