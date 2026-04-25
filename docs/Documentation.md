@@ -1079,10 +1079,11 @@ The number of Monte Carlo runs required depends on the method, the system size, 
 
 **Node pruning (`max_nodes_per_period`):**
 - **Purpose:** node explosion is limited by pruning low-probability scenarios at each period, keeping the branching graph readable and computationally manageable. Without pruning, the number of nodes can grow exponentially across periods.
-- **How it works:** when the number of nodes in a period exceeds `max_nodes_per_period`, the top-\(K\) nodes ranked by incoming probability mass (sum of transition weights from all parent nodes) are kept by the builder. Transition probabilities are renormalised after pruning, and the graph remains connected (if a parent's outgoing edges are all pruned, it falls back to the most likely kept node).
+- **How it works:** when the number of nodes in a period exceeds `max_nodes_per_period`, the top-\(K\) nodes ranked by incoming probability mass (sum of transition weights from all parent nodes) are kept by the builder. Transition probabilities are renormalised after pruning. If a parent's outgoing edges are all pruned, that parent becomes a dead-end for that step (empty outgoing distribution), rather than forcing a fallback edge.
 - **Testing:** `max_nodes_per_period = 20`–\(40\) is set for rapid exploration and visualisation. Enough diversity is provided to see major pathway archetypes while keeping plots readable.
 - **Production:** for comprehensive analysis, `max_nodes_per_period = 50`–\(100\) or `None` (no pruning) is considered. Rare but potentially important scenarios are preserved by higher values, at the cost of increased computation and visual complexity. The choice depends on whether completeness (capturing all significant pathways) or readability (focussing on high-probability paths) is prioritised.
 - **Trade-off:** rare branches are intentionally dropped by pruning for readability, which can cause differences between branching-derived summaries and full Monte Carlo ensembles. If rare events need to be captured, either `max_nodes_per_period` is increased or Monte Carlo ensembles are used without explicit graph construction.
+- **Top-path implication:** under aggressive pruning, dead-ends can reduce or eliminate `top_paths` in `BranchingResult`.
 
 **Comparison:**
 - Fewer total runs (200–2,000) are required by Monte Carlo ensembles but each run is a full trajectory. Best for estimating time-series marginals and overall distributional properties.
