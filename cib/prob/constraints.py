@@ -19,10 +19,22 @@ def validate_marginals(factors: Iterable[FactorSpec], marginals: Marginals, *, t
     It is validated that marginals cover all factors/outcomes and sum to 1 per factor.
     """
     tol = float(tol)
-    for f in factors:
+    factor_specs = [f for f in factors]
+    factor_names = {str(f.name) for f in factor_specs}
+    extra_factors = sorted(str(name) for name in marginals.keys() if str(name) not in factor_names)
+    if extra_factors:
+        raise ValueError(f"Unknown marginal factors provided: {extra_factors!r}")
+    for f in factor_specs:
         if f.name not in marginals:
             raise ValueError(f"Missing marginals for factor {f.name!r}")
         probs = marginals[f.name]
+        extra_outcomes = sorted(
+            str(o_name) for o_name in probs.keys() if str(o_name) not in set(str(o) for o in f.outcomes)
+        )
+        if extra_outcomes:
+            raise ValueError(
+                f"Unknown marginal outcomes for factor {f.name!r}: {extra_outcomes!r}"
+            )
         missing = [o for o in f.outcomes if o not in probs]
         if missing:
             raise ValueError(f"Missing marginal outcomes for factor {f.name!r}: {missing!r}")
@@ -75,6 +87,11 @@ def validate_multipliers(
         if b not in outcomes_by_factor[j]:
             raise ValueError(
                 f"Unknown multiplier outcome {b!r} for factor {j!r}"
+            )
+        if i == j:
+            raise ValueError(
+                "Invalid multiplier key: source and condition factors must differ "
+                f"(got {i!r})"
             )
 
         value = float(raw_value)

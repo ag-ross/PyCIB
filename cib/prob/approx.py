@@ -32,6 +32,8 @@ class ApproxJointDistribution:
             raise ValueError("support_probabilities must be 1D")
         if int(self.support_indices.shape[0]) != int(self.support_probabilities.shape[0]):
             raise ValueError("support arrays must have the same length")
+        if len({int(i) for i in self.support_indices.tolist()}) != int(self.support_indices.shape[0]):
+            raise ValueError("support_indices must be unique")
         if np.any(self.support_probabilities < 0.0):
             raise ValueError("support_probabilities must be non-negative")
         s = float(np.sum(self.support_probabilities))

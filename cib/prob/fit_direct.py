@@ -31,12 +31,16 @@ def _normalized_kl_baseline(
         q = np.asarray(kl_baseline, dtype=float)
         if q.ndim != 1 or int(q.shape[0]) != int(index.size):
             raise ValueError("KL baseline has wrong shape")
+        if not np.all(np.isfinite(q)):
+            raise ValueError("KL baseline must contain only finite values")
         if float(kl_baseline_eps) > 0.0:
             q = np.maximum(q, float(kl_baseline_eps))
         qs = float(np.sum(q))
         if qs <= 0.0:
             raise ValueError("KL baseline is degenerate (sum <= 0)")
         q = q / qs
+    if not np.all(np.isfinite(q)):
+        raise ValueError("KL baseline normalization produced non-finite values")
     if np.any(q <= 0.0):
         raise ValueError("KL baseline has zeros; cannot use KL regularisation")
     return q
@@ -331,6 +335,15 @@ def fit_joint_direct(
     if s <= 0.0:
         raise RuntimeError("Direct fit returned degenerate distribution")
     p = p / s
+    lin_res_post = C @ p - d
+    max_abs_marg_res_post = (
+        float(np.max(np.abs(lin_res_post))) if lin_res_post.size else 0.0
+    )
+    if max_abs_marg_res_post > 1e-5:
+        raise RuntimeError(
+            "Direct fit post-processing violated marginal constraints "
+            f"(max_abs_residual={max_abs_marg_res_post})"
+        )
     if not return_report:
         return p
 
