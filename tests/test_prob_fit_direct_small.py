@@ -234,3 +234,52 @@ def test_fit_direct_rejects_negative_relevance_weights() -> None:
             relevance_weights={("A", "B"): -1.0},
         )
 
+
+def test_fit_direct_rejects_non_finite_kl_baseline_values() -> None:
+    factors = [FactorSpec("A", ["a0", "a1"]), FactorSpec("B", ["b0", "b1"])]
+    marginals = {"A": {"a0": 0.5, "a1": 0.5}, "B": {"b0": 0.5, "b1": 0.5}}
+    index = ScenarioIndex(factors)
+    multipliers = {(("A", "a1"), ("B", "b1")): 1.1}
+
+    with pytest.raises(ValueError, match="KL baseline must contain only finite values"):
+        _ = fit_joint_direct(
+            index=index,
+            marginals=marginals,
+            multipliers=multipliers,
+            kl_weight=1.0,
+            kl_baseline=np.array([0.4, np.nan, 0.3, 0.3], dtype=float),
+        )
+
+
+def test_fit_direct_raises_if_postprocessing_breaks_marginal_constraints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DummyResult:
+        def __init__(self, x: np.ndarray) -> None:
+            self.success = True
+            self.message = "dummy"
+            self.x = x
+            self.nit = 1
+            self.status = 0
+
+    def _dummy_minimize(fun, x0, **kwargs):  # type: ignore[no-untyped-def]
+        # Deliberately violates configured marginals after clipping/normalization.
+        return _DummyResult(np.array([1.0, 0.0, 0.0, 0.0], dtype=float))
+
+    monkeypatch.setattr(fit_direct_mod, "minimize", _dummy_minimize)
+
+    factors = [FactorSpec("A", ["a0", "a1"]), FactorSpec("B", ["b0", "b1"])]
+    marginals = {"A": {"a0": 0.6, "a1": 0.4}, "B": {"b0": 0.7, "b1": 0.3}}
+    index = ScenarioIndex(factors)
+    multipliers = {(("A", "a1"), ("B", "b1")): 1.2}
+
+    with pytest.raises(RuntimeError, match="post-processing violated marginal constraints"):
+        _ = fit_joint_direct(
+            index=index,
+            marginals=marginals,
+            multipliers=multipliers,
+            kl_weight=0.0,
+            random_seed=123,
+            solver_maxiter=10,
+        )
+

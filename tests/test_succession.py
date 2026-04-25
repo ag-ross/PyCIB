@@ -7,7 +7,7 @@ correct convergence behaviour and attractor identification.
 
 import pytest
 
-from cib.core import CIBMatrix, Scenario
+from cib.core import CIBMatrix, ConsistencyChecker, Scenario
 from cib.dynamic import DynamicCIB
 from cib.succession import (
     AttractorFinder,
@@ -115,6 +115,20 @@ class TestGlobalSuccession:
             succession.find_attractor(
                 scenario, matrix, max_iterations=1, allow_partial=False
             )
+
+    def test_default_tolerance_matches_consistency_checker_near_tie(self) -> None:
+        descriptors = {"A": ["a0", "a1"], "B": ["b0", "b1"]}
+        matrix = CIBMatrix(descriptors)
+        matrix.set_impact("A", "a0", "B", "b0", 1.0)
+        matrix.set_impact("A", "a0", "B", "b1", 1.0 + 5e-9)
+
+        scenario = Scenario({"A": "a0", "B": "b0"}, matrix)
+        assert ConsistencyChecker.check_consistency(scenario, matrix) is True
+
+        global_successor = GlobalSuccession().find_successor(scenario, matrix)
+        local_successor = LocalSuccession().find_successor(scenario, matrix)
+        assert global_successor == scenario
+        assert local_successor == scenario
 
 
 class TestLocalSuccession:
@@ -231,6 +245,7 @@ class TestTimeToEquilibrium:
         path = dyn.trace_to_equilibrium(
             initial={"A": "Low", "B": "Low", "C": "Low"},
             max_iterations=3,
+            succession_operator=GlobalSuccession(float_atol=0.0, float_rtol=0.0),
         )
 
         assert all(

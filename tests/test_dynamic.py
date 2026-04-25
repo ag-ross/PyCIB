@@ -30,6 +30,16 @@ from cib.regimes import RegimeSpec
 from cib.transition_kernel import DefaultTransitionKernel
 
 
+class _SamplingSpyMatrix(CIBMatrix):
+    def __init__(self, descriptors):
+        super().__init__(descriptors)
+        self.sampled_seeds = []
+
+    def sample_matrix(self, seed: int, sigma_scale: float = 1.0):  # type: ignore[override]
+        self.sampled_seeds.append(int(seed))
+        return self
+
+
 class TestDynamicCIB:
     """Test suite for DynamicCIB."""
 
@@ -330,6 +340,63 @@ class TestDynamicCIB:
         for p in paths:
             assert list(p.periods) == periods
             assert len(p.scenarios) == len(periods)
+
+    def test_simulate_path_seed_none_uses_nondeterministic_judgment_sampling(self) -> None:
+        m = _SamplingSpyMatrix({"A": ["Low", "High"]})
+        dyn = DynamicCIB(m, periods=[1, 2, 3])
+
+        _ = dyn.simulate_path(
+            initial={"A": "Low"},
+            seed=None,
+            judgment_sigma_scale_by_period={1: 1.0, 2: 1.0, 3: 1.0},
+        )
+        seeds_first = tuple(m.sampled_seeds)
+        m.sampled_seeds.clear()
+        _ = dyn.simulate_path(
+            initial={"A": "Low"},
+            seed=None,
+            judgment_sigma_scale_by_period={1: 1.0, 2: 1.0, 3: 1.0},
+        )
+        seeds_second = tuple(m.sampled_seeds)
+
+        assert len(seeds_first) == 3
+        assert len(seeds_second) == 3
+        assert seeds_first != seeds_second
+
+    def test_simulate_path_seed_none_uses_nondeterministic_structural_seed_base(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        m = CIBMatrix({"A": ["Low", "High"]})
+        dyn = DynamicCIB(m, periods=[1, 2, 3])
+
+        import cib.shocks as shocks_mod
+
+        captured = {"seeds": []}
+        original_sample = shocks_mod.ShockModel.sample_shocked_matrix
+
+        def _spy_sample(self, random_seed):  # type: ignore[no-untyped-def]
+            captured["seeds"].append(int(random_seed))
+            return original_sample(self, random_seed)
+
+        monkeypatch.setattr(shocks_mod.ShockModel, "sample_shocked_matrix", _spy_sample)
+
+        _ = dyn.simulate_path(
+            initial={"A": "Low"},
+            seed=None,
+            structural_sigma=0.01,
+        )
+        seeds_first = tuple(captured["seeds"])
+        captured["seeds"].clear()
+        _ = dyn.simulate_path(
+            initial={"A": "Low"},
+            seed=None,
+            structural_sigma=0.01,
+        )
+        seeds_second = tuple(captured["seeds"])
+
+        assert len(seeds_first) == 3
+        assert len(seeds_second) == 3
+        assert seeds_first != seeds_second
 
     def test_structural_shock_scaling_validation(self) -> None:
         descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}

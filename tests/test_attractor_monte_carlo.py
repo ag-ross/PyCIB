@@ -325,6 +325,26 @@ def test_monte_carlo_fast_and_slow_match_with_tolerances() -> None:
     assert slow.counts == fast.counts
 
 
+def test_monte_carlo_parallel_preserves_tolerance_diagnostics() -> None:
+    m = _near_tie_matrix()
+    analyzer = ScenarioAnalyzer(m)
+
+    res = analyzer.find_attractors_monte_carlo(
+        config=MonteCarloAttractorConfig(
+            runs=24,
+            seed=909,
+            succession="global",
+            use_fast_scoring=False,
+            n_jobs=2,
+            float_atol=1e-6,
+            float_rtol=0.0,
+        )
+    )
+
+    assert res.diagnostics["float_atol"] == pytest.approx(1e-6)
+    assert res.diagnostics["float_rtol"] == pytest.approx(0.0)
+
+
 def test_monte_carlo_strict_fast_surfaces_fast_scorer_failure(monkeypatch) -> None:
     m = benchmark_matrix_b1()
     analyzer = ScenarioAnalyzer(m)

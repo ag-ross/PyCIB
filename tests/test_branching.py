@@ -173,6 +173,22 @@ class TestBranchingPathwayBuilder:
         assert r1.edges == r2.edges
         assert r1.top_paths == r2.top_paths
 
+    def test_non_memory_sampling_marks_approximation_contract(self) -> None:
+        m = _coordination_matrix()
+        builder = BranchingPathwayBuilder(
+            base_matrix=m,
+            periods=[1, 2],
+            initial={"A": "Low", "B": "High"},
+            max_states_to_enumerate=1,
+            n_transition_samples=20,
+            base_seed=123,
+        )
+
+        result = builder.build(top_k=5)
+
+        assert result.transition_method[1] == "sample"
+        assert result.approximation_contract == "approximate_scenario_regime_branching"
+
     def test_sampling_nodes_can_be_equilibrium_consistent(self) -> None:
         descriptors = {"A": ["Low", "High"], "B": ["Low", "High"]}
         m = CIBMatrix(descriptors)
@@ -215,7 +231,7 @@ class TestBranchingPathwayBuilder:
         assert len(out) == 1
         assert abs(sum(out.values()) - 1.0) < 1e-9
 
-    def test_min_edge_weight_pruning_falls_back_when_all_removed(self) -> None:
+    def test_min_edge_weight_pruning_returns_dead_end_when_all_removed(self) -> None:
         m = _coordination_matrix()
         b = BranchingPathwayBuilder(
             base_matrix=m,
@@ -229,8 +245,7 @@ class TestBranchingPathwayBuilder:
         )
         r = b.build(top_k=5)
         out = r.edges[(0, 0)]
-        assert len(out) == 1
-        assert abs(sum(out.values()) - 1.0) < 1e-9
+        assert out == {}
 
     def test_threshold_evaluated_on_post_cyclic_scenario(self) -> None:
         """

@@ -36,6 +36,11 @@ def test_model_rejects_non_positive_multiplier() -> None:
         _ = _base_model({(("A", "a1"), ("B", "b1")): 0.0})
 
 
+def test_model_rejects_same_factor_multiplier_key() -> None:
+    with pytest.raises(ValueError, match="must differ"):
+        _ = _base_model({(("A", "a0"), ("A", "a1")): 1.1})
+
+
 def test_fit_joint_iterative_rejects_invalid_sampling_parameters() -> None:
     model = _base_model({})
     with pytest.raises(ValueError, match="n_samples must be >= 1"):

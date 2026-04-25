@@ -7,6 +7,8 @@ These tests validate TransitionKernel interface and DefaultTransitionKernel
 
 from __future__ import annotations
 
+import pytest
+
 from cib.core import CIBMatrix, Scenario
 from cib.pathway import MemoryState
 from cib.transition_kernel import CallableTransitionKernel, DefaultTransitionKernel
@@ -238,15 +240,35 @@ def test_transition_kernel_replay_does_not_alias_initial_memory_state() -> None:
     assert initial_memory.values["phase"]["value"] == 0
 
 
-def test_scenario_from_state_dict_fallback_does_not_reference_missing_matrix_attr() -> None:
-    """Fallback reconstruction should use scenario descriptor space safely."""
+def test_scenario_from_state_dict_raises_for_incompatible_active_matrix() -> None:
     matrix_original = _simple_matrix()
     matrix_incompatible = CIBMatrix({"A": ["L", "H"], "B": ["X", "Y"]})
     scenario = Scenario({"A": "Low", "B": "High"}, matrix_original)
 
-    rebuilt = DefaultTransitionKernel._scenario_from_state_dict(
-        scenario,
-        matrix_incompatible,
-        {"A": "Low", "B": "High"},
-    )
-    assert rebuilt.to_dict() == {"A": "Low", "B": "High"}
+    with pytest.raises(ValueError, match="Invalid state"):
+        _ = DefaultTransitionKernel._scenario_from_state_dict(
+            scenario,
+            matrix_incompatible,
+            {"A": "Low", "B": "High"},
+        )
+
+
+def test_default_transition_kernel_rejects_invalid_locked_state_for_active_matrix() -> None:
+    m = _simple_matrix()
+    scenario = Scenario({"A": "Low", "B": "Low"}, m)
+    kernel = DefaultTransitionKernel()
+
+    with pytest.raises(ValueError, match="Invalid locked state"):
+        _ = kernel.step(
+            current_scenario=scenario,
+            active_matrix=m,
+            regime="baseline",
+            memory_state=MemoryState(
+                period=0,
+                values={"locked_descriptors": {"B": "NotAState"}},
+                flags={},
+                export_label="m",
+            ),
+            rng=None,
+            previous_path=(),
+        )

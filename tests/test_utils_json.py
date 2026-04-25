@@ -82,3 +82,57 @@ def test_json_load_requires_explicit_v2_for_list_impacts(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="requires explicit format_version=2"):
         _ = load_from_json(str(path))
+
+
+def test_json_load_rejects_duplicate_v2_impact_records(tmp_path) -> None:
+    path = tmp_path / "duplicate_impacts_v2.json"
+    payload = {
+        "format_version": 2,
+        "descriptors": {"A": ["x", "y"], "B": ["m", "n"]},
+        "impacts": [
+            {
+                "src_desc": "A",
+                "src_state": "x",
+                "tgt_desc": "B",
+                "tgt_state": "n",
+                "impact": 3.0,
+            },
+            {
+                "src_desc": "A",
+                "src_state": "x",
+                "tgt_desc": "B",
+                "tgt_state": "n",
+                "impact": 4.0,
+            },
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Duplicate JSON impact record"):
+        _ = load_from_json(str(path))
+
+
+def test_json_load_rejects_non_mapping_descriptors(tmp_path) -> None:
+    path = tmp_path / "bad_descriptors_type.json"
+    payload = {
+        "format_version": 2,
+        "descriptors": ["A", "B"],
+        "impacts": [],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="descriptors' must be an object"):
+        _ = load_from_json(str(path))
+
+
+def test_json_load_rejects_empty_descriptor_state_label(tmp_path) -> None:
+    path = tmp_path / "empty_state.json"
+    payload = {
+        "format_version": 2,
+        "descriptors": {"A": ["x", ""], "B": ["m", "n"]},
+        "impacts": [],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="contains empty state labels"):
+        _ = load_from_json(str(path))

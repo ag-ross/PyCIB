@@ -91,6 +91,15 @@ class TestHelperFunctions:
         assert _hamming_distance(scenario1, scenario2) == 1
         assert _hamming_distance(scenario1, scenario3) == 2
 
+    def test_hamming_distance_rejects_incompatible_scenarios(self) -> None:
+        matrix_a = CIBMatrix({"A": ["Low", "High"]})
+        matrix_b = CIBMatrix({"A": ["Low", "High"], "B": ["Weak", "Strong"]})
+        scenario_a = Scenario({"A": "Low"}, matrix_a)
+        scenario_b = Scenario({"A": "Low", "B": "Weak"}, matrix_b)
+
+        with pytest.raises(ValueError, match="descriptor schema mismatch"):
+            _ = _hamming_distance(scenario_a, scenario_b)
+
     def test_scenarios_match(self) -> None:
         """Test scenario matching logic."""
         descriptors = {"A": ["Low", "High"], "B": ["Weak", "Strong"]}

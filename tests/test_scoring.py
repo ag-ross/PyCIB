@@ -7,7 +7,12 @@ from __future__ import annotations
 import pytest
 
 from cib.core import CIBMatrix, Scenario
-from cib.scoring import impact_label, judgment_section_labels, scenario_diagnostics
+from cib.scoring import (
+    _hamming_distance,
+    impact_label,
+    judgment_section_labels,
+    scenario_diagnostics,
+)
 
 
 def _simple_matrix() -> CIBMatrix:
@@ -74,6 +79,15 @@ class TestScenarioDiagnostics:
 
         assert strict.is_consistent is False
         assert tolerant.is_consistent is True
+
+    def test_hamming_distance_rejects_incompatible_scenarios(self) -> None:
+        matrix_a = CIBMatrix({"A": ["Low", "High"]})
+        matrix_b = CIBMatrix({"A": ["Low", "High"], "B": ["Low", "High"]})
+        scenario_a = Scenario({"A": "Low"}, matrix_a)
+        scenario_b = Scenario({"A": "Low", "B": "Low"}, matrix_b)
+
+        with pytest.raises(ValueError, match="descriptor schema mismatch"):
+            _ = _hamming_distance(scenario_a, scenario_b)
 
 
 class TestJudgmentSectionLabels:

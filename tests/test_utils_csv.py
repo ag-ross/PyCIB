@@ -95,6 +95,45 @@ def test_save_to_csv_rolls_back_when_second_replace_fails(tmp_path, monkeypatch)
     assert imp_path.read_text(encoding="utf-8") == "old impacts\n"
 
 
+def test_save_to_csv_preserves_backups_and_journal_if_restore_fails(
+    tmp_path, monkeypatch
+) -> None:
+    matrix = _matrix()
+    desc_path = tmp_path / "descriptors.csv"
+    imp_path = tmp_path / "impacts.csv"
+    desc_path.write_text("old descriptors\n", encoding="utf-8")
+    imp_path.write_text("old impacts\n", encoding="utf-8")
+
+    original_replace = utils_mod.os.replace
+    fail_second_replace = {"active": True}
+    fail_restore = {"active": False}
+
+    def flaky_replace(src: str, dst: str) -> None:
+        if fail_second_replace["active"] and dst == str(imp_path) and ".tmp_imp_" in src:
+            fail_second_replace["active"] = False
+            fail_restore["active"] = True
+            raise OSError("simulated second replace failure")
+        if fail_restore["active"] and dst == str(desc_path) and ".bak_desc_" in src:
+            raise OSError("simulated descriptor restore failure")
+        original_replace(src, dst)
+
+    monkeypatch.setattr(utils_mod.os, "replace", flaky_replace)
+
+    with pytest.raises(OSError, match="simulated descriptor restore failure"):
+        save_to_csv(matrix, str(desc_path), str(imp_path))
+
+    desc_backups = list(tmp_path.glob(".bak_desc_*.csv"))
+    imp_backups = list(tmp_path.glob(".bak_imp_*.csv"))
+    assert desc_backups, "descriptor backup should be preserved for recovery"
+    assert imp_backups, "impact backup should be preserved for recovery"
+    journal_path = utils_mod._csv_journal_path(str(desc_path), str(imp_path))
+    assert utils_mod.os.path.exists(journal_path), "journal should be preserved"
+    with open(journal_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    assert payload["descriptors_backup"] in {str(path) for path in desc_backups}
+    assert payload["impacts_backup"] in {str(path) for path in imp_backups}
+
+
 def test_save_to_csv_recovers_from_stale_journal(tmp_path) -> None:
     matrix = _matrix()
     desc_path = tmp_path / "descriptors.csv"
@@ -127,7 +166,7 @@ def test_save_to_csv_recovers_from_stale_journal(tmp_path) -> None:
     assert impacts == dict(matrix.iter_impacts())
 
 
-def test_load_from_csv_state_count_preserves_empty_labels(tmp_path) -> None:
+def test_load_from_csv_state_count_rejects_empty_labels(tmp_path) -> None:
     desc_path = tmp_path / "descriptors.csv"
     imp_path = tmp_path / "impacts.csv"
     desc_path.write_text(
@@ -139,10 +178,24 @@ def test_load_from_csv_state_count_preserves_empty_labels(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    descriptors, impacts = load_from_csv(str(desc_path), str(imp_path))
-    assert descriptors["A"] == ["", "H"]
-    assert descriptors["B"] == ["L", "H"]
-    assert impacts == {}
+    with pytest.raises(ValueError, match="contains empty state labels"):
+        _ = load_from_csv(str(desc_path), str(imp_path))
+
+
+def test_load_from_csv_rejects_descriptor_row_without_states(tmp_path) -> None:
+    desc_path = tmp_path / "descriptors.csv"
+    imp_path = tmp_path / "impacts.csv"
+    desc_path.write_text(
+        "Descriptor,StateCount,State1,State2\nA,0,,\nB,2,L,H\n",
+        encoding="utf-8",
+    )
+    imp_path.write_text(
+        "Source_Descriptor,Source_State,Target_Descriptor,Target_State,Impact\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must define at least one state"):
+        _ = load_from_csv(str(desc_path), str(imp_path))
 
 
 def test_save_to_csv_writes_state_count_column(tmp_path) -> None:
