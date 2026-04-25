@@ -71,12 +71,13 @@ def _hamming_distance(scenario_a: Scenario, scenario_b: Scenario) -> int:
     Returns:
         Number of descriptors that differ between the scenarios.
     """
-    return int(
-        sum(
-            x != y
-            for x, y in zip(scenario_a.to_indices(), scenario_b.to_indices())
-        )
-    )
+    if scenario_a.descriptors != scenario_b.descriptors:
+        raise ValueError("Scenarios are incompatible: descriptor schema mismatch")
+    a_idx = scenario_a.to_indices()
+    b_idx = scenario_b.to_indices()
+    if len(a_idx) != len(b_idx):
+        raise ValueError("Scenarios are incompatible: descriptor index length mismatch")
+    return int(sum(x != y for x, y in zip(a_idx, b_idx)))
 
 
 def _scenarios_match(

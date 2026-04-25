@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 DEFAULT_FAST_SCORER_WORKSPACE_BYTES = 512 * 1024 * 1024
+DEFAULT_FLOAT_ATOL = 1e-08
+DEFAULT_FLOAT_RTOL = 1e-05
 
 
 class CIBMatrix:
@@ -615,8 +617,8 @@ class ConsistencyChecker:
         out_diagnostics: Optional[Dict[str, Any]] = None,
         *,
         max_fast_workspace_bytes: Optional[int] = DEFAULT_FAST_SCORER_WORKSPACE_BYTES,
-        float_atol: float = 1e-08,
-        float_rtol: float = 1e-05,
+        float_atol: float = DEFAULT_FLOAT_ATOL,
+        float_rtol: float = DEFAULT_FLOAT_RTOL,
     ) -> bool:
         """
         Whether a scenario satisfies the consistency condition is verified.
@@ -679,8 +681,8 @@ class ConsistencyChecker:
         scenario: Scenario,
         matrix: CIBMatrix,
         *,
-        float_atol: float = 1e-08,
-        float_rtol: float = 1e-05,
+        float_atol: float = DEFAULT_FLOAT_ATOL,
+        float_rtol: float = DEFAULT_FLOAT_RTOL,
     ) -> Dict[str, Any]:
         """
         Consistency is checked and detailed diagnostics are returned.
@@ -737,8 +739,8 @@ class ConsistencyChecker:
         scenario: Scenario,
         matrix: CIBMatrix,
         *,
-        float_atol: float = 1e-08,
-        float_rtol: float = 1e-05,
+        float_atol: float = DEFAULT_FLOAT_ATOL,
+        float_rtol: float = DEFAULT_FLOAT_RTOL,
     ) -> List[str]:
         """
         Descriptors that violate the consistency condition are found.

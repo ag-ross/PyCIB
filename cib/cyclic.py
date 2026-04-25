@@ -29,6 +29,7 @@ class CyclicDescriptor:
     def validate(self) -> None:
         if not self.transition:
             raise ValueError("transition matrix cannot be empty")
+        states = set(self.transition.keys())
         for cur, row in self.transition.items():
             if not row:
                 raise ValueError(f"transition row for {cur!r} cannot be empty")
@@ -36,6 +37,10 @@ class CyclicDescriptor:
             if not np.isclose(s, 1.0):
                 raise ValueError(f"transition probabilities for {cur!r} must sum to 1.0")
             for nxt, p in row.items():
+                if nxt not in states:
+                    raise ValueError(
+                        f"transition for {cur!r} references unknown next state {nxt!r}"
+                    )
                 if float(p) < 0:
                     raise ValueError(
                         f"transition probability must be non-negative: {cur!r}->{nxt!r}"

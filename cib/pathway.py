@@ -499,6 +499,10 @@ def _weighted_quantiles(
     order = np.argsort(values)
     v = values[order]
     w = weights[order]
+    if not np.all(np.isfinite(w)):
+        raise ValueError("weights must be finite")
+    if np.any(w < 0.0):
+        raise ValueError("weights must be non-negative")
     w_sum = float(np.sum(w))
     if w_sum <= 0.0:
         raise ValueError("weights must sum to a positive value")

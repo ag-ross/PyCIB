@@ -16,7 +16,13 @@ from typing import Dict, List, Mapping, Optional, Union
 import numpy as np
 
 from cib.constraints import ConstraintIndex
-from cib.core import CIBMatrix, ImpactBalance, Scenario
+from cib.core import (
+    CIBMatrix,
+    DEFAULT_FLOAT_ATOL,
+    DEFAULT_FLOAT_RTOL,
+    ImpactBalance,
+    Scenario,
+)
 
 
 @dataclass
@@ -159,7 +165,12 @@ class GlobalSuccession(SuccessionOperator):
     maximum-impact states. This is the most common succession rule.
     """
 
-    def __init__(self, *, float_atol: float = 0.0, float_rtol: float = 0.0) -> None:
+    def __init__(
+        self,
+        *,
+        float_atol: float = DEFAULT_FLOAT_ATOL,
+        float_rtol: float = DEFAULT_FLOAT_RTOL,
+    ) -> None:
         self.float_atol = float(float_atol)
         self.float_rtol = float(float_rtol)
 
@@ -366,7 +377,12 @@ class LocalSuccession(SuccessionOperator):
     gap between current and maximum impact score).
     """
 
-    def __init__(self, *, float_atol: float = 0.0, float_rtol: float = 0.0) -> None:
+    def __init__(
+        self,
+        *,
+        float_atol: float = DEFAULT_FLOAT_ATOL,
+        float_rtol: float = DEFAULT_FLOAT_RTOL,
+    ) -> None:
         self.float_atol = float(float_atol)
         self.float_rtol = float(float_rtol)
 

@@ -170,7 +170,13 @@ def descriptor_disequilibrium_contributions(
 
 
 def _hamming_distance(a: Scenario, b: Scenario) -> float:
-    return float(sum(x != y for x, y in zip(a.to_indices(), b.to_indices())))
+    if a.descriptors != b.descriptors:
+        raise ValueError("Scenarios are incompatible: descriptor schema mismatch")
+    a_idx = a.to_indices()
+    b_idx = b.to_indices()
+    if len(a_idx) != len(b_idx):
+        raise ValueError("Scenarios are incompatible: descriptor index length mismatch")
+    return float(sum(x != y for x, y in zip(a_idx, b_idx)))
 
 
 def _scenario_space_size(matrix: CIBMatrix) -> int:

@@ -113,7 +113,9 @@ def load_from_csv(
         with open(descriptors_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                desc_name = row["Descriptor"]
+                desc_name = str(row["Descriptor"])
+                if not desc_name.strip():
+                    raise ValueError("Descriptor name cannot be empty in descriptors CSV")
                 if desc_name in descriptors:
                     raise ValueError(
                         f"Duplicate descriptor row encountered: '{desc_name}'"
@@ -130,14 +132,25 @@ def load_from_csv(
                             f"StateCount must be non-negative for descriptor {desc_name!r}"
                         )
                     states = [row.get(f"State{i+1}", "") for i in range(state_count)]
+                    empty_states = [i + 1 for i, state in enumerate(states) if not str(state).strip()]
+                    if empty_states:
+                        raise ValueError(
+                            f"Descriptor {desc_name!r} contains empty state labels "
+                            f"at positions {empty_states}"
+                        )
                 else:
                     states = [
-                        row[key]
+                        str(row[key])
                         for key in row.keys()
-                        if key != "Descriptor" and key.startswith("State") and row[key]
+                        if key != "Descriptor"
+                        and key.startswith("State")
+                        and str(row[key]).strip()
                     ]
-                if states:
-                    descriptors[desc_name] = states
+                if not states:
+                    raise ValueError(
+                        f"Descriptor {desc_name!r} must define at least one state"
+                    )
+                descriptors[desc_name] = states
     except FileNotFoundError:
         raise FileNotFoundError(f"Descriptors file not found: {descriptors_path}")
     except KeyError as e:
@@ -310,7 +323,7 @@ def save_to_csv(
         if os.path.exists(journal_path):
             os.unlink(journal_path)
     except Exception:
-        for tmp_path in (desc_tmp, imp_tmp, desc_backup, imp_backup, journal_path):
+        for tmp_path in (desc_tmp, imp_tmp):
             if tmp_path is None:
                 continue
             try:
@@ -357,7 +370,7 @@ def load_from_json(
     if "impacts" not in data:
         raise ValueError("JSON missing 'impacts' key")
 
-    descriptors = data["descriptors"]
+    descriptors_raw = data["descriptors"]
     impacts_raw = data["impacts"]
     format_version = data.get("format_version")
 
@@ -370,6 +383,32 @@ def load_from_json(
             raise ValueError("JSON format_version=2 requires impacts as a list of records")
         if int(format_version) == 1 and not isinstance(impacts_raw, dict):
             raise ValueError("JSON format_version=1 requires impacts as a legacy object map")
+
+    if not isinstance(descriptors_raw, dict):
+        raise ValueError("JSON 'descriptors' must be an object mapping names to state lists")
+    descriptors: Dict[str, List[str]] = {}
+    for desc_name, states_raw in descriptors_raw.items():
+        desc = str(desc_name)
+        if not desc.strip():
+            raise ValueError("JSON descriptor names must be non-empty")
+        if not isinstance(states_raw, list):
+            raise ValueError(
+                f"JSON descriptor {desc!r} must map to a list of states"
+            )
+        if not states_raw:
+            raise ValueError(
+                f"JSON descriptor {desc!r} must define at least one state"
+            )
+        states = [str(state) for state in states_raw]
+        if any(not state.strip() for state in states):
+            raise ValueError(
+                f"JSON descriptor {desc!r} contains empty state labels"
+            )
+        if len(set(states)) != len(states):
+            raise ValueError(
+                f"JSON descriptor {desc!r} contains duplicate states"
+            )
+        descriptors[desc] = states
 
     impacts: Dict[Tuple[str, str, str, str], float] = {}
     if isinstance(impacts_raw, list):
@@ -386,7 +425,13 @@ def load_from_json(
                 raise ValueError(
                     f"Invalid JSON impact record: missing key {exc.args[0]!r}"
                 ) from exc
-            impacts[(src_desc, src_state, tgt_desc, tgt_state)] = impact
+            key = (src_desc, src_state, tgt_desc, tgt_state)
+            if key in impacts:
+                raise ValueError(
+                    "Duplicate JSON impact record encountered for "
+                    f"{(src_desc, src_state, tgt_desc, tgt_state)}"
+                )
+            impacts[key] = impact
     elif isinstance(impacts_raw, dict):
         warnings.warn(
             "Legacy JSON impact key format detected; please re-save to migrate "

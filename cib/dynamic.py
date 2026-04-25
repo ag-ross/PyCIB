@@ -980,6 +980,12 @@ class DynamicCIB:
             )
 
         rng = np.random.default_rng(seed)
+        seed_rng = np.random.default_rng(None if seed is None else int(seed))
+        resolved_structural_seed_base = (
+            int(structural_seed_base)
+            if structural_seed_base is not None
+            else int(seed_rng.integers(0, np.iinfo(np.int32).max))
+        )
 
         scenarios: List[Scenario] = []
         equilibrium_scenarios: Optional[List[Scenario]] = (
@@ -1052,21 +1058,24 @@ class DynamicCIB:
             if judgment_sigma_scale_by_period is not None:
                 scale = float(judgment_sigma_scale_by_period.get(int(t), 1.0))
                 if hasattr(self.base_matrix, "sample_matrix"):
+                    sample_seed = (
+                        int(seed) + 1000 * period_idx
+                        if seed is not None
+                        else int(seed_rng.integers(0, np.iinfo(np.int32).max))
+                    )
                     try:
                         matrix_period = self.base_matrix.sample_matrix(  # type: ignore[attr-defined]
-                            int(seed or 0) + 1000 * period_idx, sigma_scale=scale
+                            sample_seed, sigma_scale=scale
                         )
                     except TypeError:
                         # Backward compatibility: sampling is performed without sigma_scale.
                         matrix_period = self.base_matrix.sample_matrix(  # type: ignore[attr-defined]
-                            int(seed or 0) + 1000 * period_idx
+                            sample_seed
                         )
 
             if structural_sigma is not None:
                 from cib.shocks import ShockModel
 
-                if structural_seed_base is None:
-                    structural_seed_base = int(seed or 0) + 50_000
                 sm = ShockModel(matrix_period)
                 sm.add_structural_shocks(
                     sigma=float(structural_sigma),
@@ -1076,7 +1085,7 @@ class DynamicCIB:
                     scale_by_state=structural_shock_scale_by_state,
                 )
                 matrix_period = sm.sample_shocked_matrix(
-                    int(structural_seed_base) + int(period_idx)
+                    int(resolved_structural_seed_base) + int(period_idx)
                 )
 
             # Threshold rules are evaluated to select the active CIM for this period.
@@ -1350,6 +1359,12 @@ class DynamicCIB:
             return_structural_consistency = True
 
         rng = np.random.default_rng(seed)
+        seed_rng = np.random.default_rng(None if seed is None else int(seed))
+        resolved_structural_seed_base = (
+            int(structural_seed_base)
+            if structural_seed_base is not None
+            else int(seed_rng.integers(0, np.iinfo(np.int32).max))
+        )
         realised_scenarios: List[Scenario] = []
         realised_scenarios_internal: List[Scenario] = []
         equilibrium_scenarios: Optional[List[Scenario]] = (
@@ -1487,13 +1502,18 @@ class DynamicCIB:
             if judgment_sigma_scale_by_period is not None:
                 scale = float(judgment_sigma_scale_by_period.get(int(t), 1.0))
                 if hasattr(regime_matrix, "sample_matrix"):
+                    sample_seed = (
+                        int(seed) + 1000 * period_idx
+                        if seed is not None
+                        else int(seed_rng.integers(0, np.iinfo(np.int32).max))
+                    )
                     try:
                         matrix_period = regime_matrix.sample_matrix(  # type: ignore[attr-defined]
-                            int(seed or 0) + 1000 * period_idx, sigma_scale=scale
+                            sample_seed, sigma_scale=scale
                         )
                     except TypeError:
                         matrix_period = regime_matrix.sample_matrix(  # type: ignore[attr-defined]
-                            int(seed or 0) + 1000 * period_idx
+                            sample_seed
                         )
                     judgment_labels.append(f"sigma_scale={scale}")
                     period_events.append(
@@ -1515,8 +1535,6 @@ class DynamicCIB:
             if sigma_t is not None and float(sigma_t) > 0:
                 from cib.shocks import ShockModel
 
-                if structural_seed_base is None:
-                    structural_seed_base = int(seed or 0) + 50_000
                 sm = ShockModel(matrix_period)
                 sm.add_structural_shocks(
                     sigma=float(sigma_t),
@@ -1526,7 +1544,7 @@ class DynamicCIB:
                     scale_by_state=structural_shock_scale_by_state,
                 )
                 matrix_period = sm.sample_shocked_matrix(
-                    int(structural_seed_base) + int(period_idx)
+                    int(resolved_structural_seed_base) + int(period_idx)
                 )
                 structural_labels.append(f"sigma={float(sigma_t)}")
                 period_events.append(

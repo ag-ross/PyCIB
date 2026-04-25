@@ -331,16 +331,9 @@ class DefaultTransitionKernel(TransitionKernel):
 
     @staticmethod
     def _scenario_from_state_dict(
-        scenario: Scenario, active_matrix: CIBMatrix, state_dict: Dict[str, str]
+        _scenario: Scenario, active_matrix: CIBMatrix, state_dict: Dict[str, str]
     ) -> Scenario:
-        try:
-            return Scenario(state_dict, active_matrix)
-        except (ValueError, TypeError):
-            fallback_descriptors = {
-                descriptor: list(scenario._descriptor_states[descriptor])
-                for descriptor in scenario.descriptors
-            }
-            return Scenario(state_dict, CIBMatrix(fallback_descriptors))
+        return Scenario(state_dict, active_matrix)
 
     def step(
         self,
@@ -412,6 +405,14 @@ class DefaultTransitionKernel(TransitionKernel):
             for descriptor, expected_state in locked_descriptors.items():
                 descriptor_name = str(descriptor)
                 locked_state = str(expected_state)
+                if descriptor_name not in state_dict:
+                    raise ValueError(
+                        f"Locked descriptor {descriptor_name!r} is not present in active scenario"
+                    )
+                if locked_state not in active_matrix.descriptors[descriptor_name]:
+                    raise ValueError(
+                        f"Invalid locked state {locked_state!r} for descriptor {descriptor_name!r}"
+                    )
                 if descriptor_name in state_dict and state_dict[descriptor_name] != locked_state:
                     state_dict[descriptor_name] = locked_state
                     applied_locks.append(descriptor_name)

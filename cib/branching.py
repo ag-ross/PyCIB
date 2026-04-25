@@ -288,14 +288,11 @@ def _prune_distribution(
         )
 
     if not out:
-        # A fallback is used so that graph connectivity is preserved.
-        best = max(dist.items(), key=lambda kv: (float(kv[1]), _sort_key(kv[0])))[0]
-        return {best: 1.0}
+        return {}
 
     s = float(sum(out.values()))
     if s <= 0.0:
-        best = max(out.items(), key=lambda kv: (float(kv[1]), _sort_key(kv[0])))[0]
-        return {best: 1.0}
+        return {}
     return {k: float(v) / s for k, v in out.items()}
 
 
@@ -1319,10 +1316,7 @@ class BranchingPathwayBuilder:
                     filtered = {remap[int(k)]: float(v) for k, v in out.items() if int(k) in kept_old}
                     s = float(sum(filtered.values()))
                     if s <= 0.0:
-                        # If everything was pruned away, the most likely kept node is used as a fallback.
-                        # This keeps the graph connected for plotting and top-path extraction.
-                        best_old = max(kept_old, key=lambda i: incoming.get(int(i), 0.0))
-                        filtered = {remap[int(best_old)]: 1.0}
+                        filtered = {}
                     else:
                         filtered = {k: v / s for k, v in filtered.items()}
                     edges[(p_idx, src_idx)] = filtered
@@ -1354,6 +1348,7 @@ class BranchingPathwayBuilder:
             new_paths.sort(key=lambda x: x[1], reverse=True)
             paths = new_paths[:top_k]
 
+        used_sampling = any(method == "sample" for method in transition_method.values())
         return BranchingResult(
             periods=periods,
             scenarios_by_period=tuple(tuple(layer) for layer in scenarios_by_period),
@@ -1375,7 +1370,11 @@ class BranchingPathwayBuilder:
                 f"transitions use retained realised history with history_horizon="
                 f"{self.history_horizon if self.history_horizon is not None else 'full'}"
                 if memory_aware
-                else "exact_scenario_regime_branching"
+                else (
+                    "approximate_scenario_regime_branching"
+                    if used_sampling
+                    else "exact_scenario_regime_branching"
+                )
             ),
         )
 

@@ -256,7 +256,13 @@ class ScenarioVisualizer:
             raise ValueError(f"Invalid edge_metric: {edge_metric!r}")
 
         def _hamming(a: Scenario, b: Scenario) -> int:
-            return int(sum(x != y for x, y in zip(a.to_indices(), b.to_indices())))
+            if a.descriptors != b.descriptors:
+                raise ValueError("Scenarios are incompatible: descriptor schema mismatch")
+            a_idx = a.to_indices()
+            b_idx = b.to_indices()
+            if len(a_idx) != len(b_idx):
+                raise ValueError("Scenarios are incompatible: descriptor index length mismatch")
+            return int(sum(x != y for x, y in zip(a_idx, b_idx)))
 
         def _impact_vector(s: Scenario) -> np.ndarray:
             from cib.core import ImpactBalance
