@@ -9,9 +9,29 @@ import sys
 import os
 import subprocess
 import time
+import json
+import uuid
 
 # The parent directory is added to the path.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+DEBUG_LOG_PATH = "/Users/small/Documents/CODE/CODEREVIEW/PyCIB-main/.cursor/debug-16c90d.log"
+
+def _debug_log(run_id, hypothesis_id, location, message, data):
+    # #region agent log
+    payload = {
+        "sessionId": "16c90d",
+        "runId": run_id,
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+        "id": f"log_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}",
+    }
+    with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as fp:
+        fp.write(json.dumps(payload, separators=(",", ":")) + "\n")
+    # #endregion
 
 def run_example(script_name, description):
     """Run an example script and return success status."""
@@ -30,6 +50,16 @@ def run_example(script_name, description):
         "example_probabilistic_cia_sparse_kl.py": 600,
     }
     timeout_seconds = timeout_by_script.get(script_name, 300)
+    run_id = f"run_example:{script_name}"
+    # #region agent log
+    _debug_log(
+        run_id,
+        "H2",
+        "examples/run_all_examples.py:run_example:start",
+        "Starting example subprocess",
+        {"script": script_name, "timeoutSeconds": timeout_seconds},
+    )
+    # #endregion
 
     try:
         mpl_config = os.path.join(os.path.dirname(os.path.dirname(script_path)), ".mplconfig")
@@ -50,6 +80,21 @@ def run_example(script_name, description):
             timeout=timeout_seconds,
         )
         elapsed = time.time() - start_time
+        # #region agent log
+        _debug_log(
+            run_id,
+            "H3",
+            "examples/run_all_examples.py:run_example:result",
+            "Example subprocess finished",
+            {
+                "script": script_name,
+                "returnCode": result.returncode,
+                "elapsedSeconds": round(elapsed, 3),
+                "stdoutLength": len(result.stdout or ""),
+                "stderrLength": len(result.stderr or ""),
+            },
+        )
+        # #endregion
         
         if result.returncode == 0:
             print(f"Success ({elapsed:.2f}s)")
@@ -69,16 +114,43 @@ def run_example(script_name, description):
             return False, elapsed, result.stderr
     except subprocess.TimeoutExpired:
         elapsed = time.time() - start_time
+        # #region agent log
+        _debug_log(
+            run_id,
+            "H1",
+            "examples/run_all_examples.py:run_example:timeout",
+            "Example subprocess timeout",
+            {"script": script_name, "elapsedSeconds": round(elapsed, 3), "timeoutSeconds": timeout_seconds},
+        )
+        # #endregion
         print(f"Timeout (>{elapsed:.2f}s)")
         return False, elapsed, "Timeout after 5 minutes"
     except Exception as e:
         elapsed = time.time() - start_time
+        # #region agent log
+        _debug_log(
+            run_id,
+            "H4",
+            "examples/run_all_examples.py:run_example:exception",
+            "Runner raised exception",
+            {"script": script_name, "error": str(e), "elapsedSeconds": round(elapsed, 3)},
+        )
+        # #endregion
         print(f"Error ({elapsed:.2f}s)")
         print(f"  {str(e)}")
         return False, elapsed, str(e)
 
 def main():
     """Run all examples and generate summary."""
+    # #region agent log
+    _debug_log(
+        "run_all_examples:main",
+        "H5",
+        "examples/run_all_examples.py:main:start",
+        "Starting full examples runner",
+        {"pythonExecutable": sys.executable},
+    )
+    # #endregion
     print("=" * 70)
     print("PyCIB Example Scripts - Full Execution")
     print("=" * 70)
