@@ -15,7 +15,7 @@ import uuid
 # The parent directory is added to the path.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-DEBUG_LOG_PATH = "/Users/small/Documents/CODE/CODEREVIEW/PyCIB-main/.cursor/debug-16c90d.log"
+DEBUG_LOG_PATH = ""
 
 def _debug_log(run_id, hypothesis_id, location, message, data):
     # #region agent log
