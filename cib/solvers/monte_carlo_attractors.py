@@ -464,6 +464,8 @@ def _merge_cycles(
 
 
 def _merge_diagnostics(parts: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    if not parts:
+        return {}
     n_completed = int(sum(int(p.get("n_completed_runs", 0)) for p in parts))
     n_timeouts = int(sum(int(p.get("n_timeouts", 0)) for p in parts))
     n_cycles = int(sum(int(p.get("n_cycles", 0)) for p in parts))
@@ -474,6 +476,13 @@ def _merge_diagnostics(parts: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         total_iters_weighted += float(n) * float(mean)
     mean_iters = float(total_iters_weighted / max(1, n_completed))
     fast_fb = any(bool(p.get("fast_scorer_fallback")) for p in parts)
+    float_atol = float(parts[0].get("float_atol", 0.0))
+    float_rtol = float(parts[0].get("float_rtol", 0.0))
+    for p in parts[1:]:
+        if not np.isclose(float(p.get("float_atol", float_atol)), float_atol):
+            raise RuntimeError("Inconsistent float_atol values across Monte Carlo workers")
+        if not np.isclose(float(p.get("float_rtol", float_rtol)), float_rtol):
+            raise RuntimeError("Inconsistent float_rtol values across Monte Carlo workers")
     out: Dict[str, Any] = {
         "n_completed_runs": int(n_completed),
         "n_timeouts": int(n_timeouts),
@@ -483,6 +492,8 @@ def _merge_diagnostics(parts: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "intentional_slow_scoring_path": bool(
             parts and parts[0].get("intentional_slow_scoring_path")
         ),
+        "float_atol": float(float_atol),
+        "float_rtol": float(float_rtol),
     }
     for p in parts:
         r = p.get("fast_scorer_fallback_reason")
