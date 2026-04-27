@@ -15,10 +15,16 @@ import uuid
 # The parent directory is added to the path.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-DEBUG_LOG_PATH = ""
+DEBUG_LOG_PATH = os.environ.get(
+    "PYCIB_DEBUG_LOG_PATH",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".run_all_examples.debug.jsonl"),
+)
 
 def _debug_log(run_id, hypothesis_id, location, message, data):
     # #region agent log
+    if not DEBUG_LOG_PATH:
+        return
+
     payload = {
         "sessionId": "16c90d",
         "runId": run_id,
@@ -29,6 +35,9 @@ def _debug_log(run_id, hypothesis_id, location, message, data):
         "timestamp": int(time.time() * 1000),
         "id": f"log_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}",
     }
+    log_dir = os.path.dirname(os.path.abspath(DEBUG_LOG_PATH))
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
     with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as fp:
         fp.write(json.dumps(payload, separators=(",", ":")) + "\n")
     # #endregion
